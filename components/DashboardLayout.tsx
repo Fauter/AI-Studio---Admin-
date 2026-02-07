@@ -84,7 +84,7 @@ export default function DashboardLayout() {
 
   const navLinks = [
     { name: 'Dashboard', path: 'dashboard', icon: LayoutDashboard },
-    { name: 'Matriz de Precios', path: 'precios', icon: TableProperties },
+    { name: 'Gestión de Precios', path: 'precios', icon: TableProperties },
     { name: 'Config. Edificio', path: 'config-edificio', icon: Building2 },
     { name: 'Finanzas & Punitorios', path: 'finanzas', icon: CreditCard },
     { name: 'Accesos & Personal', path: 'accesos', icon: Users },

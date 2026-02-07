@@ -59,29 +59,42 @@ export interface BuildingLevel {
  * Price Matrix & Tariffs
  */
 
+export type VehicleIconKey = 'car' | 'bike' | 'truck' | 'bus';
+
 export interface VehicleType {
   id: string;
+  garage_id: string;
   name: string;
-  icon_key?: string; // e.g. 'car', 'bike', 'truck'
+  icon_key: VehicleIconKey | string; 
   sort_order: number;
 }
 
-export type TariffType = 'hour' | 'stay' | 'subscription' | 'service';
+// CRITICAL: Matches PostgreSQL ENUM 'tariff_type'
+export type TariffType = 'hora' | 'turno' | 'abono'; 
 
 export interface Tariff {
   id: string;
-  name: string; // e.g., 'Hora', 'Estadía 12hs', 'Abono Mensual'
+  garage_id: string;
+  name: string;
   type: TariffType;
+  
+  // Time Configuration Columns
+  days: number;
+  hours: number;
+  minutes: number;
+  tolerance: number; // Matches DB column 'tolerance'
+  
   sort_order: number;
+  is_protected: boolean; // System protected tariffs (cannot be deleted)
 }
 
 export interface Price {
-  id?: string; // Optional because upsert might create it
+  id?: string; 
   garage_id: string;
   vehicle_type_id: string;
   tariff_id: string;
   amount: number;
-  price_list_id?: string; // 'standard' by default
+  price_list: string; // CORRECTED: Matches DB Column 'price_list' (was price_list_id)
   updated_at?: string;
 }
 

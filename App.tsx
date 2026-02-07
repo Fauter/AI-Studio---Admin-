@@ -8,7 +8,7 @@ import OnboardingPage from './pages/OnboardingPage';
 import DashboardLayout from './components/DashboardLayout';
 import BuildingConfigPage from './pages/BuildingConfig';
 import PenaltyConfigPage from './pages/PenaltyConfig';
-import PriceMatrixPage from './pages/PriceMatrixPage';
+import PriceManagement from './pages/PriceManagement';
 import GlobalAdminPage from './pages/GlobalAdmin';
 
 // --- Components ---
@@ -131,7 +131,7 @@ const AppRoutes = () => {
          <Route path="dashboard" element={<DashboardHome />} />
          <Route path="config-edificio" element={<BuildingConfigPage />} />
          <Route path="finanzas" element={<PenaltyConfigPage />} />
-         <Route path="precios" element={<PriceMatrixPage />} />
+         <Route path="precios" element={<PriceManagement />} />
          <Route path="*" element={<div className="p-8 text-slate-500">Sección no encontrada.</div>} />
       </Route>
       
