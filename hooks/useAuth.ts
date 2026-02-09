@@ -5,9 +5,9 @@ import { Profile, UserRole, UserSession } from '../types';
 
 interface AuthState {
   session: Session | null;
-  user: User | null; // Supabase User
-  profile: Profile | null;
-  shadowUser: UserSession | null; // Custom User for Managers/Operators
+  user: User | null; // Supabase User object
+  profile: Profile | null; // Extended Profile data
+  shadowUser: UserSession | null; // Custom User for Managers/Operators/Auditors
   loading: boolean;
   error: string | null;
   signOut: () => Promise<void>;
@@ -32,8 +32,8 @@ export const useAuth = (): AuthState => {
         .single();
 
       if (error) {
-        // Fallback for missing profiles
-        const fallbackRole = (userMeta?.role || 'owner') as UserRole;
+        // Fallback: If profile doesn't exist yet, construct a temporary one from metadata
+        const fallbackRole = (userMeta?.role || UserRole.OWNER) as UserRole;
         setProfile({
             id: userId,
             email: userMeta?.email || null,
@@ -53,7 +53,7 @@ export const useAuth = (): AuthState => {
 
     const initAuth = async () => {
       try {
-        // 1. Try Supabase Auth (Standard)
+        // 1. Try Supabase Auth (Standard - Superadmin/Owner)
         const { data, error: sessionError } = await supabase.auth.getSession();
         
         if (mounted) {
@@ -62,7 +62,8 @@ export const useAuth = (): AuthState => {
               setUser(data.session.user);
               await fetchProfile(data.session.user.id, data.session.user);
           } else {
-              // 2. Check for Shadow Session (SessionStorage fallback)
+              // 2. Check for Shadow Session (SessionStorage fallback for Employees)
+              // Shadow sessions are ephemeral and stored in sessionStorage
               try {
                 const storedShadow = sessionStorage.getItem('garage_shadow_user');
                 if (storedShadow) {
@@ -72,7 +73,7 @@ export const useAuth = (): AuthState => {
                     id: parsed.id,
                     email: null,
                     full_name: parsed.full_name,
-                    role: parsed.role
+                    role: parsed.role as UserRole
                   });
                 }
               } catch (e) {
@@ -81,7 +82,7 @@ export const useAuth = (): AuthState => {
           }
         }
       } catch (err: any) {
-        if (mounted) setError("Error de conexión.");
+        if (mounted) setError("Error de conexión al servicio de autenticación.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -89,6 +90,7 @@ export const useAuth = (): AuthState => {
 
     initAuth();
 
+    // Listen for Supabase Auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       
@@ -96,6 +98,7 @@ export const useAuth = (): AuthState => {
       setUser(newSession?.user ?? null);
 
       if (newSession?.user) {
+        // If real auth happens, clear shadow auth
         setShadowUser(null);
         try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
         

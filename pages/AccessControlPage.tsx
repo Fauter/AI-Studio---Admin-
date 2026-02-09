@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -27,7 +28,7 @@ interface NewUserForm {
 
 export default function AccessControlPage() {
   const { garageId } = useParams<{ garageId: string }>();
-  const { user } = useAuth(); // Current Authenticated Owner
+  const { user } = useAuth(); // Dueño autenticado
   
   // --- States ---
   const [staff, setStaff] = useState<EmployeeAccount[]>([]);
@@ -52,23 +53,17 @@ export default function AccessControlPage() {
   const fetchStaff = async () => {
     setLoading(true);
     try {
-      // Direct Select query to the Shadow Auth table
-      // Filters by garage_id to ensure multi-tenancy isolation
       const { data, error } = await supabase
         .from('employee_accounts')
         .select('*')
         .eq('garage_id', garageId)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error("Supabase Fetch Error:", error);
-        throw error;
-      }
-      
+      if (error) throw error;
       setStaff(data as EmployeeAccount[] || []);
 
     } catch (err: any) {
-      console.error("Fetch Logic Error:", err);
+      console.error("Error cargando personal:", err.message);
     } finally {
       setLoading(false);
     }
@@ -77,13 +72,8 @@ export default function AccessControlPage() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 0. Security Guard
-    if (!garageId) {
-      setFormStatus({ type: 'error', text: 'Error crítico: No se identificó el garaje.' });
-      return;
-    }
-    if (!user) {
-      setFormStatus({ type: 'error', text: 'Sesión expirada. Por favor, recarga la página.' });
+    if (!garageId || !user) {
+      setFormStatus({ type: 'error', text: 'Sesión no válida. Recarga la página.' });
       return;
     }
 
@@ -91,37 +81,30 @@ export default function AccessControlPage() {
     setFormStatus(null);
 
     try {
-      // 1. Validation
+      // 1. Validaciones básicas
       if (newUser.password.length < 4) throw new Error("La contraseña debe tener al menos 4 caracteres.");
       if (newUser.username.length < 3) throw new Error("El usuario debe tener al menos 3 caracteres.");
 
-      // 2. Prepare Payload (Shadow Auth Pattern)
-      // Debug Log to inspect UUIDs and Role Value
-      console.group("Shadow Auth Debug");
-      console.log("Garage ID:", garageId);
-      console.log("Owner ID (Auth User):", user.id);
-      console.log("Target Role (Enum Value):", newUser.role);
-      console.groupEnd();
-
+      // 2. Preparar Payload (Shadow Auth)
       const payload = {
         garage_id: garageId,
-        owner_id: user.id, // CRITICAL: This MUST match auth.uid() for RLS Policy to pass
+        owner_id: user.id, // Requerido por RLS
         first_name: newUser.firstName.trim(),
         last_name: newUser.lastName.trim(),
         username: newUser.username.toLowerCase().trim(),
-        password_hash: newUser.password, // Plain text sent; Trigger encrypts it.
-        role: newUser.role // Ensure this matches DB Enum: 'manager' | 'auditor' | 'operador'
+        password_hash: newUser.password, // Se envía plano, el Trigger SQL lo encripta
+        role: newUser.role
       };
 
-      // 3. Direct Insert
+      // 3. Inserción Directa
       const { error } = await supabase
         .from('employee_accounts')
         .insert(payload);
 
       if (error) throw error;
 
-      // 4. Success Feedback
-      setFormStatus({ type: 'success', text: 'Cuenta de empleado creada exitosamente.' });
+      // 4. Éxito
+      setFormStatus({ type: 'success', text: 'Empleado registrado correctamente.' });
       setNewUser({ 
         firstName: '', 
         lastName: '', 
@@ -130,20 +113,17 @@ export default function AccessControlPage() {
         role: UserRole.MANAGER 
       });
       
-      // Refresh list
       await fetchStaff();
 
     } catch (err: any) {
-      console.error("Creation Error Details:", err);
+      console.error("Error creando usuario:", err);
       let msg = err.message || 'Error al crear usuario.';
       
-      // Specific Error Handling
+      // Manejo de errores específicos de BD
       if (err.code === '42501') {
-        msg = 'Error de Permisos (RLS): No tienes autoridad de "Dueño" sobre este registro o tu sesión ha expirado.';
+        msg = 'Permiso denegado: No eres el dueño de este garaje.';
       } else if (err.code === '23505' || msg.includes('unique_username_global')) {
-        msg = 'Este nombre de usuario ya está ocupado en el sistema.';
-      } else if (err.code === '23514') {
-        msg = 'Error de Validación: El rol seleccionado no es válido para la base de datos.';
+        msg = 'El nombre de usuario ya está en uso.';
       }
       
       setFormStatus({ type: 'error', text: msg });
@@ -153,7 +133,7 @@ export default function AccessControlPage() {
   };
 
   const handleDeleteUser = async (id: string) => {
-    if (!confirm('¿Estás seguro de revocar el acceso a este empleado? Esta acción es irreversible.')) return;
+    if (!confirm('¿Revocar acceso a este empleado? Esta acción es irreversible.')) return;
     
     try {
       const { error } = await supabase
@@ -163,7 +143,6 @@ export default function AccessControlPage() {
 
       if (error) throw error;
       
-      // Optimistic update
       setStaff(prev => prev.filter(p => p.id !== id));
       
     } catch (err: any) {
@@ -178,16 +157,16 @@ export default function AccessControlPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Users className="h-6 w-6 text-indigo-600" />
-            Control de Personal (Shadow Auth)
+            Control de Personal
           </h1>
           <p className="text-slate-500 mt-1">
-            Crea cuentas locales para Gerentes, Auditores y Operadores.
+            Gestión de cuentas locales para Gerentes, Auditores y Operadores.
           </p>
         </div>
         <button 
           onClick={fetchStaff} 
           className="text-slate-500 hover:text-indigo-600 p-2 rounded-full hover:bg-slate-100 transition-colors"
-          title="Recargar lista"
+          title="Actualizar lista"
         >
           <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -195,12 +174,12 @@ export default function AccessControlPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
         
-        {/* Creation Form Panel */}
+        {/* Panel de Creación */}
         <div className="xl:col-span-4">
            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden sticky top-6">
               <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
                  <UserPlus className="h-5 w-5 text-slate-500" />
-                 <h3 className="font-bold text-slate-800">Registrar Nuevo Empleado</h3>
+                 <h3 className="font-bold text-slate-800">Registrar Empleado</h3>
               </div>
               
               <form onSubmit={handleCreateUser} className="p-6 space-y-5">
@@ -208,7 +187,7 @@ export default function AccessControlPage() {
                  {formStatus && (
                     <div className={`p-4 rounded-lg text-sm flex items-start gap-3 ${formStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
                        {formStatus.type === 'success' ? <CheckCircle2 className="h-5 w-5 flex-shrink-0"/> : <AlertCircle className="h-5 w-5 flex-shrink-0"/>}
-                       <p className="leading-snug break-words">{formStatus.text}</p>
+                       <p className="leading-snug">{formStatus.text}</p>
                     </div>
                  )}
 
@@ -219,7 +198,7 @@ export default function AccessControlPage() {
                          type="text" required 
                          value={newUser.firstName}
                          onChange={e => setNewUser({...newUser, firstName: e.target.value})}
-                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                          placeholder="Ej. Juan"
                        />
                     </div>
@@ -229,14 +208,14 @@ export default function AccessControlPage() {
                          type="text" required 
                          value={newUser.lastName}
                          onChange={e => setNewUser({...newUser, lastName: e.target.value})}
-                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                          placeholder="Pérez"
                        />
                     </div>
                  </div>
 
                  <div className="space-y-1.5">
-                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Usuario (Login)</label>
+                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Usuario</label>
                    <div className="relative">
                       <Key className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                       <input 
@@ -248,11 +227,11 @@ export default function AccessControlPage() {
                         autoComplete="off"
                       />
                    </div>
-                   <p className="text-[10px] text-slate-400">Sin espacios. Único en todo el sistema.</p>
+                   <p className="text-[10px] text-slate-400">Sin espacios. Único globalmente.</p>
                  </div>
 
                  <div className="space-y-1.5">
-                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Contraseña Inicial</label>
+                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Contraseña</label>
                    <input 
                      type="text" required minLength={4}
                      value={newUser.password}
@@ -264,36 +243,33 @@ export default function AccessControlPage() {
                  </div>
 
                  <div className="space-y-1.5">
-                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Rol & Permisos</label>
+                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Rol</label>
                    <select 
                      value={newUser.role}
                      onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}
                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                    >
-                     <option value={UserRole.MANAGER}>Gerente (Configuración)</option>
-                     <option value={UserRole.AUDITOR}>Auditor (Solo Lectura)</option>
-                     <option value={UserRole.OPERATOR}>Operador (App Escritorio)</option>
+                     <option value={UserRole.MANAGER}>Gerente</option>
+                     <option value={UserRole.AUDITOR}>Auditor</option>
+                     <option value={UserRole.OPERATOR}>Operador</option>
                    </select>
-                   <p className="text-[10px] text-slate-400">
-                      Rol seleccionado: <span className="font-mono font-bold text-slate-500">{newUser.role}</span>
-                   </p>
                  </div>
 
                  <div className="pt-2">
                     <button 
                       type="submit"
                       disabled={isCreating}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-[0.98]"
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98]"
                     >
                        {isCreating ? <Loader2 className="h-4 w-4 animate-spin"/> : <Plus className="h-4 w-4"/>}
-                       {isCreating ? 'Procesando...' : 'Crear Cuenta'}
+                       {isCreating ? 'Registrando...' : 'Crear Cuenta'}
                     </button>
                  </div>
               </form>
            </div>
         </div>
 
-        {/* Staff List Panel */}
+        {/* Lista de Personal */}
         <div className="xl:col-span-8">
            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
              {loading ? (
@@ -331,7 +307,7 @@ export default function AccessControlPage() {
                               </div>
                               <div>
                                  <p className="font-bold text-slate-900">{s.first_name} {s.last_name}</p>
-                                 <p className="text-xs text-slate-500">Creado: {new Date(s.created_at || '').toLocaleDateString()}</p>
+                                 <p className="text-xs text-slate-500">Alta: {new Date(s.created_at || '').toLocaleDateString()}</p>
                               </div>
                            </div>
                          </td>

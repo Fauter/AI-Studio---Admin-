@@ -1,4 +1,3 @@
-
 /**
  * Enums matching Database Types
  */
@@ -7,7 +6,7 @@ export enum UserRole {
   OWNER = 'owner',
   MANAGER = 'manager',
   AUDITOR = 'auditor',
-  OPERATOR = 'operador' // Valor exacto en base de datos PostgreSQL
+  OPERATOR = 'operador' // CRITICAL: Matches PostgreSQL ENUM value exactly (lowercase)
 }
 
 export enum LevelType {
@@ -35,6 +34,7 @@ export interface EmployeeAccount {
   last_name: string;
   role: UserRole;
   created_at?: string;
+  // password_hash is omitted for security in frontend lists
 }
 
 export interface Garage {
@@ -82,7 +82,7 @@ export interface VehicleType {
   sort_order: number;
 }
 
-// CRITICAL: Matches PostgreSQL ENUM 'tariff_type'
+// Matches PostgreSQL ENUM 'tariff_type'
 export type TariffType = 'hora' | 'turno' | 'abono'; 
 
 export interface Tariff {
@@ -95,10 +95,10 @@ export interface Tariff {
   days: number;
   hours: number;
   minutes: number;
-  tolerance: number; // Matches DB column 'tolerance'
+  tolerance: number; 
   
   sort_order: number;
-  is_protected: boolean; // System protected tariffs (cannot be deleted)
+  is_protected: boolean; 
 }
 
 export interface Price {
@@ -107,7 +107,7 @@ export interface Price {
   vehicle_type_id: string;
   tariff_id: string;
   amount: number;
-  price_list: string; // CORRECTED: Matches DB Column 'price_list' (was price_list_id)
+  price_list: string;
   updated_at?: string;
 }
 
@@ -116,10 +116,10 @@ export interface Price {
  */
 
 export interface BuildingLevelDTO {
-  id?: string; // Optional for new levels not yet persisted
+  id?: string;
   display_name: string;
   type: LevelType;
-  capacity: number; // Mapped from DB total_spots
+  capacity: number;
   sort_order: number;
 }
 
@@ -129,7 +129,7 @@ export interface MonthlyPunitorioStep {
 }
 
 export interface MonthlyPunitorio {
-  month_index: number; // 0-11
+  month_index: number;
   active: boolean;
   start_day: number;
   steps: MonthlyPunitorioStep[];
@@ -137,9 +137,9 @@ export interface MonthlyPunitorio {
 
 export interface FinancialConfig {
   garage_id: string;
-  punitorio_rules: MonthlyPunitorio[] | null; // Stored as jsonb
-  payment_methods: any | null; // jsonb
-  invoice_types: any | null; // jsonb
+  punitorio_rules: MonthlyPunitorio[] | null; 
+  payment_methods: any | null; 
+  invoice_types: any | null; 
 }
 
 /**
@@ -150,16 +150,16 @@ export interface GarageAdminView {
   id: string;
   name: string;
   address: string;
-  role: UserRole; // The role of the current user for this specific garage context
+  role: UserRole;
   is_active: boolean;
 }
 
 export interface UserSession {
   id: string;
-  email: string | null; // Nullable for Shadow Users
+  email: string | null;
   full_name: string;
   role: UserRole;
-  isShadow?: boolean;
-  garage_id?: string;
+  isShadow?: boolean; 
+  garage_id?: string; 
   username?: string;
 }

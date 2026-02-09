@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { Loader2, RefreshCw } from 'lucide-react';
@@ -39,7 +40,6 @@ const RootRedirect = () => {
       }
 
       // 2. Owner/Manager Flow -> ALWAYS go to Onboarding/Selector first
-      // This unifies the flow: User sees their garages or creates one.
       navigate('/setup/onboarding', { replace: true });
     };
 
