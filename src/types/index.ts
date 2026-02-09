@@ -156,10 +156,9 @@ export interface GarageAdminView {
 
 export interface UserSession {
   id: string;
-  email: string | null; // Nullable for Shadow Users
+  email: string | null;
   full_name: string;
   role: UserRole;
-  isShadow?: boolean;
-  garage_id?: string;
-  username?: string;
+  isShadow?: boolean; // Flag to identify employee accounts
+  garage_id?: string; // Shadow users are bound to a garage
 }

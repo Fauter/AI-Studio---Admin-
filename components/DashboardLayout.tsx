@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { Outlet, useParams, useNavigate, NavLink, useLocation } from 'react-router-dom';
 import { 
@@ -12,7 +13,8 @@ import {
   Car,
   TableProperties,
   ShieldCheck,
-  Server
+  Server,
+  Lock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -31,26 +33,45 @@ export default function DashboardLayout() {
   const isSuperAdmin = profile?.role === UserRole.SUPERADMIN;
   const isGlobalAdminSection = location.pathname.startsWith('/admin/global');
 
+  // --- SECURITY GUARD: BLOCK OPERATORS/AUDITORS ---
+  // STRICT TYPING FIX: Now using UserRole.OPERATOR directly
+  const isRestrictedRole = profile?.role === UserRole.AUDITOR || profile?.role === UserRole.OPERATOR;
+
   // Fetch Garages & Security Check
   useEffect(() => {
     const fetchAndValidate = async () => {
-      if (!user) return;
+      if (!user || !profile) return;
+      
+      // Immediate exit for restricted roles
+      if (isRestrictedRole) {
+        setLoadingGarages(false);
+        return; 
+      }
 
       try {
-        let query = supabase.from('garages').select('*');
+        let fetchedGarages: Garage[] = [];
 
-        if (!isSuperAdmin) {
-           query = query.eq('owner_id', user.id);
+        if (isSuperAdmin) {
+           const { data } = await supabase.from('garages').select('*');
+           fetchedGarages = data as Garage[] || [];
+        } else if (profile.role === UserRole.OWNER) {
+           const { data } = await supabase.from('garages').select('*').eq('owner_id', user.id);
+           fetchedGarages = data as Garage[] || [];
+        } else if (profile.role === UserRole.MANAGER) {
+           // Fetch garages via pivot table for Managers
+           // NOTE: Assuming garage_managers has a relation to garages named 'garage' or we fetch IDs first
+           const { data } = await supabase
+             .from('garage_managers')
+             .select('garage_id, garages:garage_id (*)')
+             .eq('user_id', user.id);
+           
+           // Extract the garage objects from the join
+           fetchedGarages = data?.map((item: any) => item.garages) as Garage[] || [];
         }
 
-        const { data, error } = await query;
-        
-        if (error) throw error;
-        
-        const fetchedGarages = data as Garage[] || [];
         setGarages(fetchedGarages);
 
-        // --- SECURITY GUARD ---
+        // --- CONTEXT SECURITY GUARD ---
         // If we are in a garage context (garageId exists) AND not in global admin
         if (garageId && !isGlobalAdminSection) {
           const isValidGarage = fetchedGarages.find(g => g.id === garageId);
@@ -73,7 +94,7 @@ export default function DashboardLayout() {
     };
 
     fetchAndValidate();
-  }, [user, profile, garageId, navigate, isSuperAdmin, isGlobalAdminSection]);
+  }, [user, profile, garageId, navigate, isSuperAdmin, isGlobalAdminSection, isRestrictedRole]);
 
   const handleGarageChange = (newId: string) => {
     const parts = location.pathname.split('/');
@@ -85,7 +106,6 @@ export default function DashboardLayout() {
   const navLinks = [
     { name: 'Dashboard', path: 'dashboard', icon: LayoutDashboard },
     { name: 'Gestión de Precios', path: 'precios', icon: TableProperties },
-    { name: 'Config. Edificio', path: 'config-edificio', icon: Building2 },
     { name: 'Finanzas & Punitorios', path: 'finanzas', icon: CreditCard },
     { name: 'Accesos & Personal', path: 'accesos', icon: Users },
     { name: 'Configuración', path: 'ajustes', icon: Settings },
@@ -93,6 +113,29 @@ export default function DashboardLayout() {
 
   if (loadingGarages) {
     return <div className="flex h-screen items-center justify-center bg-slate-50 text-slate-500">Cargando entorno...</div>;
+  }
+
+  // --- RESTRICTED ACCESS VIEW ---
+  if (isRestrictedRole) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-slate-100 p-6 text-center">
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full">
+          <div className="mx-auto w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
+            <Lock className="h-8 w-8 text-amber-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">Acceso Web Restringido</h1>
+          <p className="text-slate-500 mb-8">
+            Tu perfil de <strong>{profile?.role?.toUpperCase()}</strong> solo tiene acceso a través de la aplicación de escritorio o móvil. No puedes acceder al panel administrativo web.
+          </p>
+          <button 
+            onClick={() => signOut()}
+            className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+          >
+            <LogOut className="h-4 w-4" /> Cerrar Sesión
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const currentGarage = garages.find(g => g.id === garageId);
@@ -209,7 +252,10 @@ export default function DashboardLayout() {
             </div>
             <div className="flex-1 overflow-hidden">
               <p className="truncate text-sm font-medium text-white">{profile?.full_name || 'Usuario'}</p>
-              <p className="truncate text-xs text-slate-500 capitalize">{profile?.role || 'Invitado'}</p>
+              {/* BADGE GERENTE/ROL */}
+              <p className="truncate text-[10px] text-indigo-400 font-bold tracking-wider uppercase mt-0.5">
+                {profile?.role === UserRole.MANAGER ? 'GERENTE' : profile?.role}
+              </p>
             </div>
             <button 
               onClick={() => signOut()} 

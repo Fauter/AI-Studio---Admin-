@@ -302,7 +302,7 @@ export default function PriceManagement() {
                               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                               onBlur={(e) => handlePriceUpsert(t.id, v.id, e.target.value)}
                               className={cn(
-                                "w-full pl-6 pr-3 py-2.5 text-right font-mono font-bold text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                "no-spinner w-full pl-6 pr-3 py-2.5 text-right font-mono font-bold text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
                                 isSaving 
                                   ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner" 
                                   : "bg-transparent border-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-500 text-slate-700"
@@ -585,25 +585,25 @@ export default function PriceManagement() {
                <div className="grid grid-cols-4 gap-4">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block text-center">Días</label>
-                    <input type="number" min="0" className="w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
+                    <input type="number" min="0" className="no-spinner w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
                       value={newTariff.days} onChange={e => setNewTariff({...newTariff, days: parseInt(e.target.value) || 0})}
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block text-center">Horas</label>
-                    <input type="number" min="0" max="23" className="w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
+                    <input type="number" min="0" max="23" className="no-spinner w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
                       value={newTariff.hours} onChange={e => setNewTariff({...newTariff, hours: parseInt(e.target.value) || 0})}
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block text-center">Minutos</label>
-                    <input type="number" min="0" max="59" className="w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
+                    <input type="number" min="0" max="59" className="no-spinner w-full text-center p-2.5 rounded-lg border border-slate-300 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" 
                       value={newTariff.minutes} onChange={e => setNewTariff({...newTariff, minutes: parseInt(e.target.value) || 0})}
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-green-600 uppercase mb-1.5 block text-center">Tolerancia</label>
-                    <input type="number" min="0" className="w-full text-center p-2.5 rounded-lg border border-green-200 text-sm font-bold text-green-700 bg-green-50 focus:ring-2 focus:ring-green-500 outline-none" 
+                    <input type="number" min="0" className="no-spinner w-full text-center p-2.5 rounded-lg border border-green-200 text-sm font-bold text-green-700 bg-green-50 focus:ring-2 focus:ring-green-500 outline-none" 
                       value={newTariff.tolerance} onChange={e => setNewTariff({...newTariff, tolerance: parseInt(e.target.value) || 0})}
                     />
                   </div>
@@ -699,7 +699,7 @@ export default function PriceManagement() {
               onClick={() => setSelectedList('electronic')}
               className={cn("px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all", selectedList === 'electronic' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50')}
              >
-               <CreditCard className="h-4 w-4" /> Tarjetas
+               <CreditCard className="h-4 w-4" /> Bancario
              </button>
           </div>
         )}

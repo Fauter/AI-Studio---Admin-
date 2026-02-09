@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { Loader2, AlertTriangle, ArrowRight, RefreshCw, Server } from 'lucide-react';
-import { supabase } from './lib/supabase';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -10,6 +9,8 @@ import BuildingConfigPage from './pages/BuildingConfig';
 import PenaltyConfigPage from './pages/PenaltyConfig';
 import PriceManagement from './pages/PriceManagement';
 import GlobalAdminPage from './pages/GlobalAdmin';
+import SettingsPage from './pages/SettingsPage';
+import AccessControlPage from './pages/AccessControlPage';
 
 // --- Components ---
 
@@ -129,9 +130,10 @@ const AppRoutes = () => {
       <Route path="/:garageId" element={<DashboardLayout />}>
          <Route index element={<DashboardHome />} />
          <Route path="dashboard" element={<DashboardHome />} />
-         <Route path="config-edificio" element={<BuildingConfigPage />} />
          <Route path="finanzas" element={<PenaltyConfigPage />} />
          <Route path="precios" element={<PriceManagement />} />
+         <Route path="accesos" element={<AccessControlPage />} />
+         <Route path="ajustes" element={<SettingsPage />} />
          <Route path="*" element={<div className="p-8 text-slate-500">Sección no encontrada.</div>} />
       </Route>
       

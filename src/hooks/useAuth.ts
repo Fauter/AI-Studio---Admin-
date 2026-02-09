@@ -62,21 +62,21 @@ export const useAuth = (): AuthState => {
               setUser(data.session.user);
               await fetchProfile(data.session.user.id, data.session.user);
           } else {
-              // 2. Check for Shadow Session (SessionStorage fallback)
-              try {
-                const storedShadow = sessionStorage.getItem('garage_shadow_user');
-                if (storedShadow) {
-                  const parsed = JSON.parse(storedShadow);
-                  setShadowUser(parsed);
-                  setProfile({
-                    id: parsed.id,
-                    email: null,
-                    full_name: parsed.full_name,
-                    role: parsed.role
-                  });
-                }
-              } catch (e) {
-                // Ignore storage errors in restricted environments
+              // 2. Check for Shadow Session (In Memory/Local for this session)
+              // Since persistence is off in lib/supabase, we rely on App state passed down, 
+              // or effectively the user is logged out on refresh (Desired security behavior).
+              // To persist shadow users across refresh in a real app, we'd use sessionStorage here.
+              const storedShadow = sessionStorage.getItem('garage_shadow_user');
+              if (storedShadow) {
+                const parsed = JSON.parse(storedShadow);
+                setShadowUser(parsed);
+                // Map shadow user to Profile interface for compatibility
+                setProfile({
+                  id: parsed.id,
+                  email: null,
+                  full_name: parsed.full_name,
+                  role: parsed.role
+                });
               }
           }
         }
@@ -96,9 +96,8 @@ export const useAuth = (): AuthState => {
       setUser(newSession?.user ?? null);
 
       if (newSession?.user) {
-        setShadowUser(null);
-        try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
-        
+        setShadowUser(null); // Clear shadow if real auth happens
+        sessionStorage.removeItem('garage_shadow_user');
         if (!profile || profile.id !== newSession.user.id) {
            await fetchProfile(newSession.user.id, newSession.user);
         }
@@ -121,7 +120,7 @@ export const useAuth = (): AuthState => {
       full_name: sUser.full_name,
       role: sUser.role
     });
-    try { sessionStorage.setItem('garage_shadow_user', JSON.stringify(sUser)); } catch (e) {}
+    sessionStorage.setItem('garage_shadow_user', JSON.stringify(sUser));
     setLoading(false);
   };
 
@@ -129,7 +128,7 @@ export const useAuth = (): AuthState => {
     setLoading(true);
     try {
         await supabase.auth.signOut();
-        try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
+        sessionStorage.removeItem('garage_shadow_user');
     } finally {
         setSession(null);
         setUser(null);

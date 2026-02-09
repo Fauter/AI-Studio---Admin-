@@ -1,389 +1,447 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { 
   Building2, 
   Save, 
   ArrowUp, 
   ArrowDown, 
+  Home,
   Layers, 
   CheckCircle2, 
   AlertCircle,
-  CarFront
+  Loader2,
+  ParkingSquare
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { LevelType, BuildingLevel, BuildingConfig } from '../types';
+import { LevelType, BuildingLevel, BuildingLevelDTO } from '../types';
+import { clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return twMerge(clsx(inputs));
+}
 
 export default function BuildingConfigPage() {
   const { garageId } = useParams<{ garageId: string }>();
   
-  // State for the configuration form
-  const [config, setConfig] = useState<BuildingConfig>({
-    garage_id: garageId || '',
-    count_subsuelos: 0,
-    has_planta_baja: true,
-    count_pisos: 0
-  });
-
-  // Raw data from DB
-  const [dbLevels, setDbLevels] = useState<BuildingLevel[]>([]);
-  
-  // Derived state for UI (The stack of levels being edited)
-  const [levelsPreview, setLevelsPreview] = useState<Partial<BuildingLevel>[]>([]);
-  
+  // --- Global State ---
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-  // 1. Load initial data
+  // --- Data Source of Truth (DB) ---
+  const [dbLevels, setDbLevels] = useState<BuildingLevel[]>([]);
+  
+  // --- UI/Working State ---
+  const isSwitchingGarage = useRef(false);
+  
+  const [floorCount, setFloorCount] = useState<number>(0);
+  const [basementCount, setBasementCount] = useState<number>(0);
+  const [hasGroundFloor, setHasGroundFloor] = useState<boolean>(true);
+  
+  const [levelsPreview, setLevelsPreview] = useState<BuildingLevelDTO[]>([]);
+
+  // --- 1. Master Reset & Fetch (Anti-Leakage) ---
+  
   useEffect(() => {
     if (!garageId) return;
 
-    const fetchData = async () => {
-      try {
-        setLoading(true);
+    const initGarageContext = async () => {
+      // CRITICAL: Clean Slate Protocol
+      // Instantly wipe all data from previous garage to prevent cross-contamination
+      isSwitchingGarage.current = true;
+      setLoading(true);
+      setDbLevels([]);
+      setLevelsPreview([]);
+      setFloorCount(0);
+      setBasementCount(0);
+      setHasGroundFloor(true);
+      setFeedback(null);
 
+      try {
         // Fetch Config
         const { data: configData, error: configError } = await supabase
           .from('building_configs')
           .select('*')
           .eq('garage_id', garageId)
-          .single();
+          .maybeSingle(); 
+
+        if (configError) throw configError;
 
         // Fetch Levels
         const { data: levelsData, error: levelsError } = await supabase
           .from('building_levels')
           .select('*')
-          .eq('garage_id', garageId)
-          .order('sort_order', { ascending: false }); // Order top to bottom for logic
+          .eq('garage_id', garageId);
+          
+        if (levelsError) throw levelsError;
 
+        // Update Source of Truth
+        setDbLevels(levelsData || []);
+
+        // Initialize UI Controls based on DB Config
         if (configData) {
-          setConfig(configData);
-        } else if (configError && configError.code !== 'PGRST116') {
-          // If error is not "Not Found", throw it
-          throw configError;
-        }
-
-        if (levelsData) {
-          setDbLevels(levelsData);
+          setFloorCount(configData.count_pisos || 0);
+          setBasementCount(configData.count_subsuelos || 0);
+          setHasGroundFloor(configData.has_planta_baja ?? true);
         }
 
       } catch (err: any) {
-        console.error('Error fetching building data:', err);
-        setMessage({ type: 'error', text: 'Error al cargar la configuración.' });
+        console.error("Fetch Error:", err);
+        setFeedback({ type: 'error', text: "Error al cargar datos. Verifica tu conexión." });
       } finally {
+        isSwitchingGarage.current = false;
         setLoading(false);
       }
     };
 
-    fetchData();
+    initGarageContext();
   }, [garageId]);
 
-  // 2. Generate Preview Logic (The Reconciliation)
+  // --- 2. Tower Reconciliation (The Builder) ---
+  
   useEffect(() => {
-    if (loading) return;
-    generateLevelsStructure();
+    // Prevent reconciliation running during initialization or switching
+    if (loading || isSwitchingGarage.current) return;
+
+    reconcileTower();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.count_pisos, config.has_planta_baja, config.count_subsuelos, loading]);
+  }, [floorCount, basementCount, hasGroundFloor, loading]);
 
-  const generateLevelsStructure = () => {
-    const newStructure: Partial<BuildingLevel>[] = [];
+  const reconcileTower = () => {
+    const newLevels: BuildingLevelDTO[] = [];
 
-    // Helper to find existing data for a specific sort_order to preserve ID and Spots
-    const findExisting = (order: number) => dbLevels.find(l => l.sort_order === order);
+    const resolveLevelData = (order: number, defaultName: string, type: LevelType) => {
+      // 1. Check active unsaved edits
+      const current = levelsPreview.find(l => l.sort_order === order);
+      if (current) return current;
 
-    // A. Generate Floors (Pisos) - Top Down (N to 1)
-    const pisos = config.count_pisos || 0;
-    for (let i = pisos; i >= 1; i--) {
-      const existing = findExisting(i);
-      newStructure.push({
-        id: existing?.id, // Keep ID if exists to update, undefined = insert
-        garage_id: garageId,
-        type: LevelType.PISO,
-        level_number: i,
-        display_name: existing?.display_name || `Piso ${i}`,
-        sort_order: i,
-        total_spots: existing?.total_spots || 0
-      });
+      // 2. Check DB history (Prevents data loss on resize)
+      const persisted = dbLevels.find(l => l.sort_order === order);
+      if (persisted) {
+        return {
+          // We keep the ID internally for reference, but handleSave will strip it for the payload logic
+          id: persisted.id,
+          sort_order: persisted.sort_order!,
+          type: persisted.type!,
+          display_name: persisted.display_name!,
+          capacity: persisted.total_spots || 0 
+        };
+      }
+
+      // 3. New Instance
+      return {
+        sort_order: order,
+        type: type,
+        display_name: defaultName,
+        capacity: 0
+      };
+    };
+
+    // A. Floors (Top to Bottom: N -> 1)
+    for (let i = floorCount; i >= 1; i--) {
+      newLevels.push(resolveLevelData(i, `Piso ${i}`, LevelType.PISO));
     }
 
-    // B. Generate Ground Floor (PB) - Sort Order 0
-    if (config.has_planta_baja) {
-      const existing = findExisting(0);
-      newStructure.push({
-        id: existing?.id,
-        garage_id: garageId,
-        type: LevelType.PLANTA_BAJA,
-        level_number: 0,
-        display_name: existing?.display_name || 'Planta Baja',
-        sort_order: 0,
-        total_spots: existing?.total_spots || 0
-      });
+    // B. Ground Floor (0)
+    if (hasGroundFloor) {
+      newLevels.push(resolveLevelData(0, 'Planta Baja', LevelType.PLANTA_BAJA));
     }
 
-    // C. Generate Basements (Subsuelos) - Top Down (1 to N) -> Sort Order -1 to -N
-    const subsuelos = config.count_subsuelos || 0;
-    for (let i = 1; i <= subsuelos; i++) {
+    // C. Basements (-1 -> -N)
+    for (let i = 1; i <= basementCount; i++) {
       const sortOrder = -i;
-      const existing = findExisting(sortOrder);
-      newStructure.push({
-        id: existing?.id,
-        garage_id: garageId,
-        type: LevelType.SUBSUELO,
-        level_number: i,
-        display_name: existing?.display_name || `Subsuelo ${i}`,
-        sort_order: sortOrder,
-        total_spots: existing?.total_spots || 0
-      });
+      newLevels.push(resolveLevelData(sortOrder, `Subsuelo ${i}`, LevelType.SUBSUELO));
     }
 
-    setLevelsPreview(newStructure);
+    setLevelsPreview(newLevels);
   };
 
-  const handleSpotChange = (index: number, value: string) => {
+  // --- 3. Handlers ---
+
+  const handleLevelUpdate = (index: number, field: keyof BuildingLevelDTO, value: any) => {
     const updated = [...levelsPreview];
-    updated[index].total_spots = parseInt(value) || 0;
+    updated[index] = { ...updated[index], [field]: value };
     setLevelsPreview(updated);
   };
 
   const handleSave = async () => {
     if (!garageId) return;
     setSaving(true);
-    setMessage(null);
+    setFeedback(null);
 
     try {
-      // 1. Upsert Config
+      // 1. Config Upsert (Always reliable)
       const { error: configErr } = await supabase
         .from('building_configs')
         .upsert({
           garage_id: garageId,
-          count_subsuelos: config.count_subsuelos,
-          has_planta_baja: config.has_planta_baja,
-          count_pisos: config.count_pisos
-        });
+          count_pisos: floorCount,
+          count_subsuelos: basementCount,
+          has_planta_baja: hasGroundFloor
+        }, { onConflict: 'garage_id' });
 
       if (configErr) throw configErr;
 
-      // 2. Upsert Levels
-      // Clean payload for DB (remove undefined IDs if strictly needed, but Supabase handles upsert without ID as insert if we don't pass it in match key)
-      const levelsPayload = levelsPreview.map(l => ({
-        id: l.id, // If undefined, Supabase generates UUID
+      // 2. Levels Upsert - ID STRIPPING STRATEGY
+      // We explicitly REMOVE the 'id' field from the payload.
+      // We rely 100% on the UNIQUE constraint (garage_id, sort_order).
+      // If the row exists, Postgres updates it. If not, it creates it with a new UUID.
+      
+      const levelsPayload = levelsPreview.map(dto => ({
         garage_id: garageId,
-        type: l.type,
-        level_number: l.level_number,
-        display_name: l.display_name,
-        total_spots: l.total_spots,
-        sort_order: l.sort_order
+        type: dto.type,
+        level_number: Math.abs(dto.sort_order),
+        display_name: dto.display_name,
+        total_spots: dto.capacity || 0, // Map Frontend 'capacity' -> DB 'total_spots'
+        sort_order: dto.sort_order
+        // NO 'id' FIELD HERE. This prevents error 23502.
       }));
 
-      // NOTE: Supabase UPSERT needs the Primary Key to update. 
-      // If `id` is undefined, it creates a new row.
-      const { data: savedLevels, error: levelsErr } = await supabase
+      // 3. Atomic Upsert
+      const { data: savedData, error: levelsErr } = await supabase
         .from('building_levels')
-        .upsert(levelsPayload as any, { onConflict: 'id' })
+        .upsert(levelsPayload, { onConflict: 'garage_id,sort_order' }) 
         .select();
 
       if (levelsErr) throw levelsErr;
 
-      // Update local state with the newly saved real IDs
-      if (savedLevels) {
-        setDbLevels(savedLevels as BuildingLevel[]);
+      // 4. Post-Save Sync
+      // We fetch the fresh data (including the IDs generated/updated) and update our local state.
+      if (savedData) {
+        const castedData = savedData as BuildingLevel[];
+        setDbLevels(castedData);
+        
+        // Re-map the preview to include the new IDs for future reference (though we won't send them next time either)
+        setLevelsPreview(prev => prev.map(p => {
+          const fresh = castedData.find(d => d.sort_order === p.sort_order);
+          return fresh ? { ...p, id: fresh.id } : p;
+        }));
       }
 
-      setMessage({ type: 'success', text: 'Configuración guardada correctamente.' });
-      
+      setFeedback({ type: 'success', text: 'Estructura guardada correctamente.' });
+
     } catch (err: any) {
-      console.error('Error saving:', err);
-      setMessage({ type: 'error', text: `Error al guardar: ${err.message}` });
+      console.error("Save Error:", err);
+      let msg = err.message || 'Error desconocido';
+      if (msg.includes('null value in column "id"')) msg = 'Error de Integridad: El sistema intentó crear un nivel inválido.';
+      setFeedback({ type: 'error', text: `Error: ${msg}` });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return <div className="p-8 text-center text-slate-500">Cargando estructura del edificio...</div>;
-  }
+  if (loading) return (
+    <div className="flex h-[50vh] items-center justify-center flex-col gap-4 text-slate-400">
+      <Loader2 className="h-10 w-10 animate-spin text-indigo-500" />
+      <p className="animate-pulse">Sincronizando Estructura...</p>
+    </div>
+  );
+
+  const totalCapacity = levelsPreview.reduce((acc, curr) => acc + (curr.capacity || 0), 0);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 text-slate-200 p-6 md:p-12 rounded-3xl border border-slate-900 shadow-2xl">
+      
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-blue-600" />
+          <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+            <Building2 className="h-8 w-8 text-indigo-500" />
             Configuración de Edificio
           </h1>
-          <p className="text-slate-500 mt-1">Define la estructura física y la capacidad de tu garaje.</p>
+          <p className="text-slate-400 mt-2 text-lg">Define la estructura vertical y la capacidad de tu garaje.</p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`
-            flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-white transition-all
-            ${saving ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'}
-          `}
-        >
-          {saving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"/> : <Save className="h-4 w-4" />}
-          {saving ? 'Guardando...' : 'Guardar Cambios'}
-        </button>
+
+        <div className="flex items-center gap-4">
+           <div className="text-right hidden md:block">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Capacidad Total</p>
+              <p className="text-2xl font-mono font-bold text-indigo-400">{totalCapacity} <span className="text-sm text-slate-500">vehículos</span></p>
+           </div>
+           <button
+            onClick={handleSave}
+            disabled={saving}
+            className={cn(
+              "flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-indigo-900/20",
+              saving 
+                ? "bg-slate-800 cursor-wait text-slate-500" 
+                : "bg-indigo-600 hover:bg-indigo-500 hover:scale-105 active:scale-95"
+            )}
+          >
+            {saving ? <Loader2 className="h-5 w-5 animate-spin"/> : <Save className="h-5 w-5" />}
+            {saving ? 'Aplicando...' : 'Guardar Cambios'}
+          </button>
+        </div>
       </div>
 
-      {message && (
-        <div className={`p-4 rounded-lg border flex items-center gap-3 ${
-          message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
-        }`}>
-          {message.type === 'success' ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-          {message.text}
+      {feedback && (
+        <div className={cn(
+          "mb-8 p-4 rounded-xl border flex items-center gap-3 animate-in fade-in slide-in-from-top-4",
+          feedback.type === 'success' ? 'bg-emerald-950/30 border-emerald-800 text-emerald-400' : 'bg-red-950/30 border-red-800 text-red-400'
+        )}>
+          {feedback.type === 'success' ? <CheckCircle2 className="h-5 w-5"/> : <AlertCircle className="h-5 w-5"/>}
+          <p className="font-medium">{feedback.text}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Configuration Form */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Layers className="h-5 w-5 text-slate-400" />
-              Estructura General
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        
+        {/* Controls Panel */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm">
+            <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+              <Layers className="h-5 w-5 text-indigo-400" />
+              Parámetros Estructurales
             </h2>
-            
-            <div className="space-y-6">
-              {/* Floors Input */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Cantidad de Pisos Superiores</label>
+
+            <div className="space-y-8">
+              {/* Floors */}
+              <div className="relative group">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block group-focus-within:text-indigo-400 transition-colors">Pisos Superiores</label>
                 <div className="flex items-center gap-3">
-                  <div className="relative flex-1">
-                    <ArrowUp className="absolute left-3 top-2.5 h-5 w-5 text-blue-500" />
-                    <input
-                      type="number"
-                      min="0"
-                      max="20"
-                      value={config.count_pisos || 0}
-                      onChange={(e) => setConfig({ ...config, count_pisos: parseInt(e.target.value) || 0 })}
-                      className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900"
-                    />
-                  </div>
-                  <span className="text-xs text-slate-400 font-medium px-2 bg-slate-100 rounded py-1">Niveles Aéreos</span>
+                   <div className="relative flex-1">
+                      <ArrowUp className="absolute left-3 top-3 h-5 w-5 text-slate-600 group-focus-within:text-indigo-500 transition-colors pointer-events-none" />
+                      <input 
+                        type="number" 
+                        min="0" max="50"
+                        value={floorCount}
+                        onChange={(e) => setFloorCount(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-white font-mono focus:ring-2 focus:ring-indigo-600 focus:border-transparent outline-none transition-all [color-scheme:dark]"
+                      />
+                   </div>
                 </div>
               </div>
 
               {/* Ground Floor Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-950 border border-slate-800">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-100 rounded-md">
-                    <CarFront className="h-5 w-5 text-green-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">Planta Baja</p>
-                    <p className="text-xs text-slate-500">Nivel a calle (Nivel 0)</p>
-                  </div>
+                   <div className="p-2 bg-slate-900 rounded-lg text-slate-400">
+                      <Home className="h-5 w-5" />
+                   </div>
+                   <div>
+                      <p className="font-bold text-slate-200 text-sm">Planta Baja</p>
+                      <p className="text-xs text-slate-500">Nivel de calle (0)</p>
+                   </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input 
                     type="checkbox" 
-                    checked={config.has_planta_baja || false} 
-                    onChange={(e) => setConfig({ ...config, has_planta_baja: e.target.checked })}
+                    checked={hasGroundFloor} 
+                    onChange={(e) => setHasGroundFloor(e.target.checked)}
                     className="sr-only peer" 
                   />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                 </label>
               </div>
 
-              {/* Basements Input */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Cantidad de Subsuelos</label>
+              {/* Basements */}
+              <div className="relative group">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block group-focus-within:text-indigo-400 transition-colors">Subsuelos</label>
                 <div className="flex items-center gap-3">
-                  <div className="relative flex-1">
-                    <ArrowDown className="absolute left-3 top-2.5 h-5 w-5 text-indigo-500" />
-                    <input
-                      type="number"
-                      min="0"
-                      max="10"
-                      value={config.count_subsuelos || 0}
-                      onChange={(e) => setConfig({ ...config, count_subsuelos: parseInt(e.target.value) || 0 })}
-                      className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900"
-                    />
-                  </div>
-                  <span className="text-xs text-slate-400 font-medium px-2 bg-slate-100 rounded py-1">Niveles Subterráneos</span>
+                   <div className="relative flex-1">
+                      <ArrowDown className="absolute left-3 top-3 h-5 w-5 text-slate-600 group-focus-within:text-indigo-500 transition-colors pointer-events-none" />
+                      <input 
+                        type="number" 
+                        min="0" max="20"
+                        value={basementCount}
+                        onChange={(e) => setBasementCount(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-white font-mono focus:ring-2 focus:ring-indigo-600 focus:border-transparent outline-none transition-all [color-scheme:dark]"
+                      />
+                   </div>
                 </div>
               </div>
             </div>
             
-            <div className="mt-6 p-4 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100">
-              <p><strong>Nota:</strong> Al reducir niveles, los datos de capacidad de los niveles eliminados no se borran de la base de datos inmediatamente, pero dejarán de ser visibles.</p>
+            <div className="mt-8 pt-6 border-t border-slate-800/50">
+               <p className="text-xs text-slate-500 leading-relaxed">
+                 <strong className="text-slate-400">Nota técnica:</strong> Los niveles se ordenan automáticamente según su posición física.
+               </p>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Visual Stack (The Building) */}
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-semibold text-slate-800 flex items-center justify-between">
-            <span>Vista Previa del Edificio</span>
-            <span className="text-sm font-normal text-slate-500">Total Capacidad: <span className="font-bold text-slate-900">{levelsPreview.reduce((acc, curr) => acc + (curr.total_spots || 0), 0)}</span> cocheras</span>
-          </h2>
-
-          <div className="flex flex-col gap-3 bg-slate-100/50 p-6 rounded-2xl border border-slate-200 min-h-[400px]">
-            {levelsPreview.length === 0 && (
-              <div className="flex-1 flex items-center justify-center text-slate-400 italic">
-                Define la estructura para ver los niveles
+        {/* Visual Tower */}
+        <div className="lg:col-span-8">
+           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 min-h-[600px] flex flex-col items-center relative overflow-hidden">
+              
+              {/* Background Grid Decoration */}
+              <div className="absolute inset-0 opacity-10 pointer-events-none" 
+                   style={{ backgroundImage: 'linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
               </div>
-            )}
 
-            {levelsPreview.map((level, idx) => {
-              // Determine styles based on level type
-              let bgColor = 'bg-white';
-              let borderColor = 'border-slate-200';
-              let iconColor = 'text-slate-400';
-              let labelColor = 'text-slate-700';
+              <h2 className="text-lg font-bold text-white mb-8 z-10 relative bg-slate-900 px-4 rounded-full border border-slate-800 shadow-sm flex items-center gap-2">
+                 Visualización de Torre
+                 {levelsPreview.length > 0 && <span className="text-xs text-slate-500">({levelsPreview.length} Niveles)</span>}
+              </h2>
 
-              if (level.type === LevelType.PISO) {
-                bgColor = 'bg-sky-50';
-                borderColor = 'border-sky-200';
-                iconColor = 'text-sky-500';
-                labelColor = 'text-sky-900';
-              } else if (level.type === LevelType.PLANTA_BAJA) {
-                bgColor = 'bg-emerald-50';
-                borderColor = 'border-emerald-300 ring-1 ring-emerald-100'; // Highlight PB
-                iconColor = 'text-emerald-600';
-                labelColor = 'text-emerald-900';
-              } else if (level.type === LevelType.SUBSUELO) {
-                bgColor = 'bg-slate-100';
-                borderColor = 'border-slate-300';
-                iconColor = 'text-slate-500';
-                labelColor = 'text-slate-800';
-              }
+              <div className="w-full max-w-2xl space-y-3 z-10 relative">
+                 {levelsPreview.map((level, idx) => {
+                    const isPb = level.type === LevelType.PLANTA_BAJA;
+                    const isFloor = level.type === LevelType.PISO;
+                    
+                    return (
+                      <div 
+                        key={idx} 
+                        className={cn(
+                          "group relative flex items-center gap-4 p-4 rounded-xl border transition-all duration-300 hover:scale-[1.01] hover:shadow-xl",
+                          isPb 
+                            ? "bg-indigo-900/20 border-indigo-500/50 shadow-lg shadow-indigo-900/10 z-10" 
+                            : "bg-slate-950 border-slate-800 hover:border-slate-700"
+                        )}
+                      >
+                         {/* Icon Marker */}
+                         <div className={cn(
+                           "flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center border font-mono font-bold text-lg",
+                           isPb ? "bg-indigo-600 border-indigo-500 text-white" : 
+                           isFloor ? "bg-slate-900 border-slate-700 text-slate-400 group-hover:text-indigo-400" :
+                           "bg-slate-900 border-slate-800 text-slate-600"
+                         )}>
+                            {isPb ? "PB" : level.sort_order}
+                         </div>
 
-              return (
-                <div 
-                  key={`${level.type}-${level.level_number}`} 
-                  className={`relative flex items-center gap-4 p-4 rounded-xl border shadow-sm transition-all hover:shadow-md ${bgColor} ${borderColor}`}
-                >
-                  {/* Icon Indicator */}
-                  <div className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-white/60 border border-white/50 shadow-sm ${iconColor}`}>
-                    {level.type === LevelType.PISO && <ArrowUp className="h-6 w-6" />}
-                    {level.type === LevelType.PLANTA_BAJA && <CarFront className="h-6 w-6" />}
-                    {level.type === LevelType.SUBSUELO && <ArrowDown className="h-6 w-6" />}
-                  </div>
+                         {/* Editable Name */}
+                         <div className="flex-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1 block group-hover:text-indigo-400 transition-colors">
+                               {isFloor ? 'Piso Superior' : isPb ? 'Nivel Calle' : 'Subsuelo'}
+                            </label>
+                            <input 
+                              type="text"
+                              value={level.display_name}
+                              onChange={(e) => handleLevelUpdate(idx, 'display_name', e.target.value)}
+                              className="w-full bg-transparent border-none p-0 text-white font-bold text-lg focus:ring-0 focus:outline-none placeholder-slate-600"
+                              placeholder="Nombre del Nivel"
+                            />
+                         </div>
 
-                  {/* Level Info */}
-                  <div className="flex-1">
-                    <h3 className={`font-bold text-lg ${labelColor}`}>{level.display_name}</h3>
-                    <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold opacity-70">{level.type?.replace('_', ' ')}</p>
-                  </div>
+                         {/* Capacity */}
+                         <div className="flex flex-col items-end">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1 block group-hover:text-indigo-400 transition-colors">
+                              Cocheras
+                            </label>
+                            <div className="flex items-center gap-2 bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-1.5 focus-within:border-indigo-500 transition-colors">
+                               <ParkingSquare className="h-4 w-4 text-slate-500" />
+                               <input 
+                                  type="number"
+                                  min="0"
+                                  value={level.capacity || ''}
+                                  onChange={(e) => handleLevelUpdate(idx, 'capacity', parseInt(e.target.value) || 0)}
+                                  className="no-spinner w-16 bg-transparent border-none p-0 text-right font-mono text-white font-bold focus:ring-0 focus:outline-none"
+                                  placeholder="0"
+                               />
+                            </div>
+                         </div>
+                      </div>
+                    );
+                 })}
 
-                  {/* Capacity Input */}
-                  <div className="flex flex-col items-end">
-                    <label className="text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Cocheras</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={level.total_spots || ''}
-                      onChange={(e) => handleSpotChange(idx, e.target.value)}
-                      className="w-24 text-right font-mono text-lg font-bold border-b-2 border-slate-300 bg-transparent focus:border-blue-600 focus:outline-none transition-colors p-1"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                 {levelsPreview.length === 0 && (
+                    <div className="py-20 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-2xl">
+                       <Building2 className="h-12 w-12 mb-4 opacity-20" />
+                       <p>Sin niveles configurados</p>
+                    </div>
+                 )}
+              </div>
+           </div>
         </div>
       </div>
     </div>
