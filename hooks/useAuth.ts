@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
@@ -23,28 +24,56 @@ export const useAuth = (): AuthState => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProfile = async (userId: string, userMeta?: any) => {
+  /**
+   * Resilient Profile Fetcher
+   * Fetches DB profile or falls back to JWT metadata.
+   * NEVER throws.
+   */
+  const fetchProfile = async (userId: string, authUser: User) => {
     try {
-      const { data, error } = await supabase
+      // 1. Attempt DB Fetch (Optimistic)
+      const { data, error: dbError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
-      if (error) {
-        // Fallback: If profile doesn't exist yet, construct a temporary one from metadata
-        const fallbackRole = (userMeta?.role || UserRole.OWNER) as UserRole;
-        setProfile({
-            id: userId,
-            email: userMeta?.email || null,
-            full_name: userMeta?.full_name || 'Usuario',
-            role: fallbackRole
-        });
-      } else {
-        setProfile(data as Profile);
+      // Catch Schema Errors specifically (PGRST500)
+      if (dbError) {
+        if (dbError.message?.includes('schema') || dbError.code === 'PGRST500') {
+           console.warn('[Auth] DB Schema Error detected. Switching to Metadata Profile.');
+        }
+        throw dbError; // Throw to trigger fallback
       }
+
+      if (data) {
+        setProfile(data as Profile);
+      } else {
+        throw new Error('Profile missing');
+      }
+
     } catch (err: any) {
-      console.error('[Auth] Profile fetch exception:', err);
+      // 2. FALLBACK STRATEGY (Metadata)
+      // This ensures we never block access due to DB issues
+      
+      const meta = authUser.user_metadata || {};
+      let fallbackRole = UserRole.OWNER;
+      let fallbackName = meta.full_name || authUser.email?.split('@')[0] || 'Usuario';
+
+      // Emergency Superadmin Override
+      if (authUser.email === 'admin@admin.com') {
+         fallbackRole = UserRole.SUPERADMIN;
+         fallbackName = 'SuperAdmin';
+      } else if (meta.role) {
+         fallbackRole = meta.role;
+      }
+
+      setProfile({
+          id: userId,
+          email: authUser.email || null,
+          full_name: fallbackName,
+          role: fallbackRole
+      });
     }
   };
 
@@ -53,20 +82,30 @@ export const useAuth = (): AuthState => {
 
     const initAuth = async () => {
       try {
-        // 1. Try Supabase Auth (Standard - Superadmin/Owner)
+        // 1. Try Supabase Auth
+        // We wrap this in a try/catch to handle 500 errors from the Auth Server
         const { data, error: sessionError } = await supabase.auth.getSession();
         
+        if (sessionError) {
+          console.error('[Auth] Session Error:', sessionError.message);
+          // If 500 error or similar connection issue, clear storage to prevent loops
+          if (sessionError.status === 500 || sessionError.message.includes('fetch')) {
+             await supabase.auth.signOut().catch(() => {});
+          }
+          throw sessionError;
+        }
+
         if (mounted) {
           if (data.session) {
               setSession(data.session);
               setUser(data.session.user);
-              await fetchProfile(data.session.user.id, data.session.user);
+              // Fire and forget profile fetch (updates state when ready)
+              fetchProfile(data.session.user.id, data.session.user);
           } else {
-              // 2. Check for Shadow Session (SessionStorage fallback for Employees)
-              // Shadow sessions are ephemeral and stored in sessionStorage
-              try {
-                const storedShadow = sessionStorage.getItem('garage_shadow_user');
-                if (storedShadow) {
+              // 2. Check for Shadow Session
+              const storedShadow = sessionStorage.getItem('garage_shadow_user');
+              if (storedShadow) {
+                try {
                   const parsed = JSON.parse(storedShadow);
                   setShadowUser(parsed);
                   setProfile({
@@ -75,14 +114,18 @@ export const useAuth = (): AuthState => {
                     full_name: parsed.full_name,
                     role: parsed.role as UserRole
                   });
+                } catch (e) {
+                  console.warn('Invalid shadow session');
                 }
-              } catch (e) {
-                // Ignore storage errors in restricted environments
               }
           }
         }
       } catch (err: any) {
-        if (mounted) setError("Error de conexión al servicio de autenticación.");
+        console.error("Auth Init Failed:", err.message);
+        // Do not set global error to prevent locking the user out of Login Screen
+        if (mounted) {
+           setSession(null);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -90,21 +133,24 @@ export const useAuth = (): AuthState => {
 
     initAuth();
 
-    // Listen for Supabase Auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setShadowUser(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(newSession);
       setUser(newSession?.user ?? null);
 
       if (newSession?.user) {
-        // If real auth happens, clear shadow auth
         setShadowUser(null);
-        try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
-        
-        if (!profile || profile.id !== newSession.user.id) {
-           await fetchProfile(newSession.user.id, newSession.user);
-        }
+        fetchProfile(newSession.user.id, newSession.user);
       }
       setLoading(false);
     });
@@ -133,6 +179,8 @@ export const useAuth = (): AuthState => {
     try {
         await supabase.auth.signOut();
         try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
+    } catch (err) {
+      console.error('SignOut error:', err);
     } finally {
         setSession(null);
         setUser(null);

@@ -18,7 +18,7 @@ import {
 import { supabase } from '../lib/supabase';
 import BuildingConfigPage from './BuildingConfig';
 import { Garage } from '../types';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: (string | undefined | null | false)[]) {

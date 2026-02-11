@@ -25,7 +25,7 @@ import {
   RefreshCw,
   MoreVertical
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -569,9 +569,8 @@ export default function PriceManagement() {
                   onChange={e => setNewTariff({...newTariff, typeKey: e.target.value})}
                   className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white font-medium"
                 >
-                  <option value="hour">Fracción / Hora</option>
-                  <option value="stay">Turno / Estadía</option>
-                  <option value="subscription">Abono Mensual</option>
+                  <option value="hour">Hora</option>
+                  <option value="stay">Turno</option>
                 </select>
                </div>
             </div>

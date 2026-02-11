@@ -6,12 +6,13 @@ import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
 import DashboardLayout from './components/DashboardLayout';
-import BuildingConfigPage from './pages/BuildingConfig';
 import PenaltyConfigPage from './pages/PenaltyConfig';
 import PriceManagement from './pages/PriceManagement';
 import GlobalAdminPage from './pages/GlobalAdmin';
 import SettingsPage from './pages/SettingsPage';
 import AccessControlPage from './pages/AccessControlPage';
+import ConfigAdmin from './components/admin/ConfigAdmin'; // Added Import
+import { UserRole } from './types';
 
 // --- Components ---
 
@@ -22,35 +23,49 @@ const DashboardHome = () => (
   </div>
 );
 
-// Intelligent Routing Component
+// MISION 2: Enrutamiento Inteligente & Seguro
 const RootRedirect = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, shadowUser } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    // 1. Wait for Auth to settle
     if (loading) return;
     
-    if (!user) return;
+    // 2. No User -> Force Login
+    if (!user && !shadowUser) {
+      // Logic handled by AppRoutes fallback, but explicit checking here helps logic flow
+      return; 
+    }
 
-    const routeUser = async () => {
-      // 1. SuperAdmin Priority
-      if (profile?.role === 'superadmin') {
+    // 3. Routing Logic
+    const routeUser = () => {
+      // A. Global Admin (Priority 1)
+      if (profile?.role === UserRole.SUPERADMIN) {
         navigate('/admin/global', { replace: true });
         return;
       }
 
-      // 2. Owner/Manager Flow -> ALWAYS go to Onboarding/Selector first
+      // B. Shadow Users / Employees (Priority 2)
+      // They must always go to onboarding/selector first to confirm context
+      if (shadowUser) {
+        navigate('/setup/onboarding', { replace: true });
+        return;
+      }
+
+      // C. Owners / Managers (Priority 3)
+      // Default to onboarding to select garage
       navigate('/setup/onboarding', { replace: true });
     };
 
     routeUser();
-  }, [user, profile, loading, navigate]);
+  }, [user, profile, loading, shadowUser, navigate]);
 
   return (
     <div className="flex h-screen items-center justify-center bg-slate-50">
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
-        <p className="text-sm text-slate-500 font-medium">Sincronizando GarageIA...</p>
+        <p className="text-sm text-slate-500 font-medium">Validando credenciales...</p>
       </div>
     </div>
   );
@@ -59,7 +74,7 @@ const RootRedirect = () => {
 // --- Main App Logic (Inside Router Context) ---
 
 const AppRoutes = () => {
-  const { session, loading, signOut } = useAuth();
+  const { session, shadowUser, loading, signOut } = useAuth();
   const [showReset, setShowReset] = useState(false);
 
   // Circuit Breaker for Infinite Loading
@@ -68,13 +83,13 @@ const AppRoutes = () => {
       if (loading) {
         setShowReset(true);
       }
-    }, 5000); 
+    }, 7000); // 7 seconds timeout
     return () => clearTimeout(timer);
   }, [loading]);
 
   const handleHardReset = async () => {
     await signOut();
-    window.location.reload();
+    window.location.href = '/'; // Hard reload
   };
 
   // --- Loading State (Elegante) ---
@@ -92,7 +107,7 @@ const AppRoutes = () => {
           
           <div className="text-center space-y-2">
             <h3 className="text-lg font-bold text-slate-800 tracking-tight">GarageIA</h3>
-            <p className="text-sm text-slate-500 font-medium animate-pulse">Conectando entorno seguro...</p>
+            <p className="text-sm text-slate-500 font-medium animate-pulse">Iniciando sistema seguro...</p>
           </div>
 
           {showReset && (
@@ -111,7 +126,8 @@ const AppRoutes = () => {
   }
 
   // --- Unauthenticated View ---
-  if (!session) {
+  // Checks both Supabase Session AND Shadow Session
+  if (!session && !shadowUser) {
     return <LoginPage />;
   }
 
@@ -121,9 +137,12 @@ const AppRoutes = () => {
       <Route path="/" element={<RootRedirect />} />
       <Route path="/setup/onboarding" element={<OnboardingPage />} />
       
-      {/* GLOBAL ADMIN ROUTE */}
+      {/* GLOBAL ADMIN ROUTES */}
       <Route path="/admin/global" element={<DashboardLayout />}>
          <Route index element={<GlobalAdminPage />} />
+         <Route path="config" element={
+            <ConfigAdmin onSystemReset={() => { window.location.href = '/admin/global'; }} />
+         } />
       </Route>
 
       {/* GARAGE CONTEXT ROUTES */}

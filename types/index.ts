@@ -1,3 +1,4 @@
+
 /**
  * Enums matching Database Types
  */
@@ -6,7 +7,7 @@ export enum UserRole {
   OWNER = 'owner',
   MANAGER = 'manager',
   AUDITOR = 'auditor',
-  OPERATOR = 'operador' // CRITICAL: Matches PostgreSQL ENUM value exactly (lowercase)
+  OPERATOR = 'operador' // Matches PostgreSQL ENUM value exactly (lowercase)
 }
 
 export enum LevelType {
@@ -27,14 +28,17 @@ export interface Profile {
 
 export interface EmployeeAccount {
   id: string;
-  garage_id: string;
   owner_id: string;
+  garage_id?: string | null; // Optional: Null means Global Employee (Owner level)
   username: string;
   first_name: string;
   last_name: string;
   role: UserRole;
   created_at?: string;
-  // password_hash is omitted for security in frontend lists
+  // Join fields (Optional)
+  garages?: {
+    name: string;
+  };
 }
 
 export interface Garage {
@@ -82,7 +86,6 @@ export interface VehicleType {
   sort_order: number;
 }
 
-// Matches PostgreSQL ENUM 'tariff_type'
 export type TariffType = 'hora' | 'turno' | 'abono'; 
 
 export interface Tariff {
@@ -90,13 +93,10 @@ export interface Tariff {
   garage_id: string;
   name: string;
   type: TariffType;
-  
-  // Time Configuration Columns
   days: number;
   hours: number;
   minutes: number;
   tolerance: number; 
-  
   sort_order: number;
   is_protected: boolean; 
 }
@@ -154,12 +154,14 @@ export interface GarageAdminView {
   is_active: boolean;
 }
 
+// CRITICAL: Aligned with RPC login_employee response
 export interface UserSession {
   id: string;
   email: string | null;
   full_name: string;
   role: UserRole;
   isShadow?: boolean; 
-  garage_id?: string; 
+  owner_id?: string; // Reference to the Organization Owner (Boss)
+  garage_id?: string; // Optional: legacy or specific assignment
   username?: string;
 }

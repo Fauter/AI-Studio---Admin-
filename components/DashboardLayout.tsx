@@ -14,7 +14,8 @@ import {
   TableProperties,
   ShieldCheck,
   Server,
-  Lock
+  Lock,
+  LayoutGrid
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -33,8 +34,7 @@ export default function DashboardLayout() {
   const isSuperAdmin = profile?.role === UserRole.SUPERADMIN;
   const isGlobalAdminSection = location.pathname.startsWith('/admin/global');
 
-  // --- SECURITY GUARD: BLOCK OPERATORS/AUDITORS ---
-  // STRICT TYPING FIX: Now using UserRole.OPERATOR directly
+  // --- SECURITY GUARD: BLOCK OPERATORS/AUDITORS & PROTECT GLOBAL ADMIN ---
   const isRestrictedRole = profile?.role === UserRole.AUDITOR || profile?.role === UserRole.OPERATOR;
 
   // Fetch Garages & Security Check
@@ -42,10 +42,17 @@ export default function DashboardLayout() {
     const fetchAndValidate = async () => {
       if (!user || !profile) return;
       
-      // Immediate exit for restricted roles
+      // 1. Restricted Roles Check (Shadow Users without Web Access)
       if (isRestrictedRole) {
         setLoadingGarages(false);
         return; 
+      }
+
+      // 2. Global Admin Security Guard (MISION 4)
+      if (isGlobalAdminSection && !isSuperAdmin) {
+        console.warn('[Security] Unauthorized access to Global Admin. Redirecting.');
+        navigate('/setup/onboarding', { replace: true });
+        return;
       }
 
       try {
@@ -59,7 +66,6 @@ export default function DashboardLayout() {
            fetchedGarages = data as Garage[] || [];
         } else if (profile.role === UserRole.MANAGER) {
            // Fetch garages via pivot table for Managers
-           // NOTE: Assuming garage_managers has a relation to garages named 'garage' or we fetch IDs first
            const { data } = await supabase
              .from('garage_managers')
              .select('garage_id, garages:garage_id (*)')
@@ -107,7 +113,7 @@ export default function DashboardLayout() {
     { name: 'Dashboard', path: 'dashboard', icon: LayoutDashboard },
     { name: 'Gestión de Precios', path: 'precios', icon: TableProperties },
     { name: 'Finanzas & Punitorios', path: 'finanzas', icon: CreditCard },
-    { name: 'Accesos & Personal', path: 'accesos', icon: Users },
+    // Removed 'Accesos & Personal' from here
     { name: 'Configuración', path: 'ajustes', icon: Settings },
   ];
 
@@ -182,19 +188,32 @@ export default function DashboardLayout() {
               <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
             )}
           </div>
+
+          {/* BACK TO ONBOARDING BUTTON */}
+          {!isGlobalAdminSection && (
+            <button
+              onClick={() => navigate('/setup/onboarding')}
+              className="mt-3 w-full group flex items-center justify-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs font-medium text-slate-400 transition-all hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+            >
+              <LayoutGrid className="h-3.5 w-3.5 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+              Volver al Hub
+            </button>
+          )}
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
           
-          {/* SUPERADMIN SECTION */}
+          {/* SUPERADMIN GLOBAL NAVIGATION */}
           {isSuperAdmin && (
             <div className="mb-6">
               <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                Super Admin
+                Sistema
               </p>
+              
               <NavLink
                 to="/admin/global"
+                end
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={({ isActive }) => `
                   group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all mb-1
@@ -204,8 +223,23 @@ export default function DashboardLayout() {
                   }
                 `}
               >
-                <ShieldCheck className="mr-3 h-5 w-5 flex-shrink-0" />
-                Administración Global
+                <LayoutDashboard className="mr-3 h-5 w-5 flex-shrink-0" />
+                Centro de Comando
+              </NavLink>
+
+              <NavLink
+                to="/admin/global/config"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) => `
+                  group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all
+                  ${isActive 
+                    ? 'bg-red-600 text-white shadow-md shadow-red-900/20' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-red-400'
+                  }
+                `}
+              >
+                <Settings className="mr-3 h-5 w-5 flex-shrink-0" />
+                Configuración Global
               </NavLink>
             </div>
           )}
