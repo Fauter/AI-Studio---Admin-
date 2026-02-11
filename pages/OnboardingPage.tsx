@@ -22,17 +22,23 @@ import {
   Trash2,
   RefreshCw,
   Search,
-  Globe
+  Globe,
+  Briefcase
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { Garage, EmployeeAccount, UserRole } from '../types';
 import clsx from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
-// --- SUB-COMPONENT: CASHFLOW SECTION (Placeholder) ---
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return twMerge(clsx(inputs));
+}
+
+// --- SUB-COMPONENT: CASHFLOW SECTION ---
 const CashFlowSection = ({ garageCount }: { garageCount: number }) => (
   <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10">
           <Wallet className="h-24 w-24 text-indigo-600" />
@@ -52,15 +58,6 @@ const CashFlowSection = ({ garageCount }: { garageCount: number }) => (
         <h3 className="text-3xl font-bold text-slate-900 mt-2">{garageCount}</h3>
         <p className="text-xs text-slate-400 mt-1">Infraestructura operativa</p>
       </div>
-
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-4 opacity-10">
-          <Users className="h-24 w-24 text-emerald-600" />
-        </div>
-        <p className="text-sm font-bold text-slate-500 uppercase tracking-wide">Personal Total</p>
-        <h3 className="text-3xl font-bold text-slate-900 mt-2">--</h3>
-        <p className="text-xs text-slate-400 mt-1">Gestión centralizada</p>
-      </div>
     </div>
 
     {garageCount === 0 && (
@@ -74,12 +71,36 @@ const CashFlowSection = ({ garageCount }: { garageCount: number }) => (
   </div>
 );
 
+// --- CONFIGURACIÓN DE ROLES UI (JERARQUÍA Y ESTILO) ---
+const ROLE_UI_CONFIG: Record<string, { label: string; weight: number; style: string; icon?: any }> = {
+  [UserRole.MANAGER]: { 
+    label: 'Gerente', 
+    weight: 1, 
+    style: 'bg-indigo-50 text-indigo-700 border-indigo-200 ring-1 ring-indigo-500/10' 
+  },
+  [UserRole.ADMINISTRATIVE]: { 
+    label: 'Administrativo', 
+    weight: 2, 
+    style: 'bg-amber-50 text-amber-700 border-amber-200 ring-1 ring-amber-500/10' 
+  },
+  [UserRole.OPERATOR]: { 
+    label: 'Operador', 
+    weight: 3, 
+    style: 'bg-emerald-50 text-emerald-700 border-emerald-200 ring-1 ring-emerald-500/10' 
+  },
+  // Fallbacks
+  [UserRole.AUDITOR]: { label: 'Auditor', weight: 4, style: 'bg-slate-100 text-slate-600 border-slate-200' },
+  [UserRole.OWNER]: { label: 'Dueño', weight: 0, style: 'bg-slate-900 text-white border-slate-700' },
+};
+
 // --- SUB-COMPONENT: GLOBAL ACCESS SECTION ---
 const GlobalAccessSection = () => {
   const { user } = useAuth();
   const [staff, setStaff] = useState<EmployeeAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  
+  // Default to MANAGER
   const [newUser, setNewUser] = useState({
     firstName: '',
     lastName: '',
@@ -87,6 +108,7 @@ const GlobalAccessSection = () => {
     password: '',
     role: UserRole.MANAGER 
   });
+  
   const [status, setStatus] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   useEffect(() => {
@@ -96,16 +118,29 @@ const GlobalAccessSection = () => {
   const fetchStaff = async () => {
     setLoading(true);
     try {
-      // Fetches employees and joins with garages table to get the name if a garage_id exists
-      // CRITICAL: Explicitly using 'garages!fk_garage' to solve ambiguous embedding (PGRST201)
+      // 1. Fetch Data
       const { data, error } = await supabase
         .from('employee_accounts')
         .select('*, garages!fk_garage(name)')
-        .eq('owner_id', user?.id)
-        .order('created_at', { ascending: false });
+        .eq('owner_id', user?.id);
         
       if (error) throw error;
-      setStaff(data as EmployeeAccount[] || []);
+      
+      const rawStaff = data as EmployeeAccount[] || [];
+
+      // 2. Sort Logic: Hierarchy (Weight) -> then Created At
+      const sortedStaff = rawStaff.sort((a, b) => {
+        const weightA = ROLE_UI_CONFIG[a.role]?.weight ?? 99;
+        const weightB = ROLE_UI_CONFIG[b.role]?.weight ?? 99;
+        
+        if (weightA !== weightB) return weightA - weightB;
+        
+        // Secondary Sort: Newest first
+        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      });
+
+      setStaff(sortedStaff);
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -123,8 +158,6 @@ const GlobalAccessSection = () => {
       if (newUser.password.length < 4) throw new Error("Contraseña muy corta (min 4).");
       if (newUser.username.length < 3) throw new Error("Usuario muy corto (min 3).");
 
-      // Logic: Create user under Owner scope. 
-      // garage_id is NOT sent, so it defaults to NULL (Global Employee)
       const { error } = await supabase.from('employee_accounts').insert({
         owner_id: user.id,
         first_name: newUser.firstName.trim(),
@@ -132,7 +165,7 @@ const GlobalAccessSection = () => {
         username: newUser.username.toLowerCase().trim(),
         password_hash: newUser.password,
         role: newUser.role
-        // garage_id is omitted intentionally
+        // garage_id is omitted intentionally (Global by default)
       });
 
       if (error) {
@@ -151,19 +184,12 @@ const GlobalAccessSection = () => {
   };
 
   const handleDeleteUser = async (id: string) => {
-    // 1. Trazabilidad
     console.log("[Delete] Intentando borrar empleado:", id);
-
     try {
-      // 2. Ejecución directa sin confirmación
       const { error } = await supabase.from('employee_accounts').delete().eq('id', id);
-      
       if (error) throw error;
-      
-      // 3. Actualizar lista
       fetchStaff();
     } catch (err) {
-      // 4. Reporte de error
       console.error("Error al eliminar empleado:", err);
       setStatus({ type: 'error', text: 'Error al intentar eliminar el empleado.' });
     }
@@ -176,30 +202,51 @@ const GlobalAccessSection = () => {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden sticky top-6">
           <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <UserPlus className="h-5 w-5 text-slate-500" />
-            <h3 className="font-bold text-slate-800">Alta de Empleado Global</h3>
+            <h3 className="font-bold text-slate-800">Alta de Personal</h3>
           </div>
-          <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+          <form onSubmit={handleCreateUser} className="p-6 space-y-5">
             {status && (
-              <div className={`p-3 rounded-lg text-sm flex gap-2 ${status.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              <div className={cn("p-3 rounded-lg text-sm flex gap-2 font-medium", 
+                status.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+              )}>
                 {status.type === 'success' ? <CheckCircle2 className="h-4 w-4"/> : <AlertCircle className="h-4 w-4"/>}
                 {status.text}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-4">
-              <input type="text" placeholder="Nombre" required value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-              <input type="text" placeholder="Apellido" required value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <input type="text" placeholder="Nombre" required value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                <input type="text" placeholder="Apellido" required value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+              </div>
+              
+              <div className="relative">
+                <Key className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <input type="text" placeholder="usuario.sistema" required value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value.replace(/\s/g, '').toLowerCase()})} className="w-full pl-9 px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+              </div>
+              
+              <input type="text" placeholder="Contraseña de Acceso" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+              
+              <div className="relative">
+                <Briefcase className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <select 
+                  value={newUser.role} 
+                  onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})} 
+                  className="w-full pl-9 px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer"
+                >
+                  <option value={UserRole.MANAGER}>Gerente</option>
+                  <option value={UserRole.ADMINISTRATIVE}>Administrativo</option>
+                  <option value={UserRole.OPERATOR}>Operador</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+              </div>
             </div>
-            <div className="relative">
-              <Key className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input type="text" placeholder="usuario.sistema" required value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value.replace(/\s/g, '').toLowerCase()})} className="w-full pl-9 px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono" />
-            </div>
-            <input type="text" placeholder="Contraseña" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono" />
-            <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
-              <option value={UserRole.MANAGER}>Gerente Administrativo</option>
-              <option value={UserRole.OPERATOR}>Operador</option>
-            </select>
-            <button type="submit" disabled={isCreating} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg flex justify-center gap-2 text-sm transition-all">
-              {isCreating ? <Loader2 className="h-4 w-4 animate-spin"/> : <Plus className="h-4 w-4"/>} Crear Cuenta
+
+            <button type="submit" disabled={isCreating} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl flex justify-center gap-2 text-sm transition-all shadow-md shadow-indigo-200">
+              {isCreating ? <Loader2 className="h-4 w-4 animate-spin"/> : <Plus className="h-4 w-4"/>} 
+              Registrar Empleado
             </button>
           </form>
         </div>
@@ -207,50 +254,81 @@ const GlobalAccessSection = () => {
 
       {/* List */}
       <div className="xl:col-span-8">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[300px]">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
           {loading ? (
-            <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-indigo-500"/></div>
+            <div className="flex h-64 items-center justify-center flex-col gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-500"/>
+              <p className="text-sm text-slate-400">Cargando equipo...</p>
+            </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-xs font-semibold">
                 <tr>
-                  <th className="px-6 py-4">Nombre</th>
-                  <th className="px-6 py-4">Usuario</th>
-                  <th className="px-6 py-4">Rol</th>
+                  <th className="px-6 py-4">Empleado</th>
+                  <th className="px-6 py-4">Credenciales</th>
+                  <th className="px-6 py-4">Rol Jerárquico</th>
                   <th className="px-6 py-4">Alcance</th>
                   <th className="px-6 py-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {staff.map(s => (
-                  <tr key={s.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-4 font-bold text-slate-800">{s.first_name} {s.last_name}</td>
-                    <td className="px-6 py-4 font-mono text-slate-500">{s.username}</td>
-                    <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded border border-slate-200 text-xs font-bold uppercase">{s.role}</span></td>
-                    <td className="px-6 py-4">
-                      {!s.garage_id ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
-                           <Globe className="h-3 w-3" /> Global
+                {staff.map(s => {
+                  const roleConfig = ROLE_UI_CONFIG[s.role] || { label: s.role, style: 'bg-slate-100 text-slate-500' };
+                  
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={cn("h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs border", 
+                            s.role === UserRole.MANAGER ? "bg-indigo-100 text-indigo-700 border-indigo-200" : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}>
+                             {s.first_name.charAt(0)}{s.last_name.charAt(0)}
+                          </div>
+                          <span className="font-bold text-slate-800">{s.first_name} {s.last_name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-slate-500 text-xs">{s.username}</td>
+                      <td className="px-6 py-4">
+                        <span className={cn("inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-tight border shadow-sm", roleConfig.style)}>
+                          {roleConfig.label}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                           <MapPin className="h-3 w-3" /> {s.garages?.name || 'Local'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => handleDeleteUser(s.id)} 
-                        className="text-slate-400 hover:text-red-600 p-2 hover:bg-red-50 rounded transition-colors"
-                        title="Eliminar empleado"
-                      >
-                        <Trash2 className="h-4 w-4"/>
-                      </button>
+                      </td>
+                      <td className="px-6 py-4">
+                        {!s.garage_id ? (
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                             <Globe className="h-3.5 w-3.5 text-indigo-500" />
+                             <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">Global</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                             <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                             <span>{s.garages?.name || 'Local'}</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                          onClick={() => handleDeleteUser(s.id)} 
+                          className="text-slate-300 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Eliminar acceso"
+                        >
+                          <Trash2 className="h-4 w-4"/>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {staff.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-20 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3">
+                         <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                           <Users className="h-8 w-8 text-slate-300" />
+                         </div>
+                         <p className="text-slate-400 font-medium">No hay personal registrado.</p>
+                      </div>
                     </td>
                   </tr>
-                ))}
-                {staff.length === 0 && (
-                  <tr><td colSpan={5} className="p-12 text-center text-slate-400">Sin empleados registrados.</td></tr>
                 )}
               </tbody>
             </table>
@@ -394,9 +472,9 @@ export default function OnboardingPage() {
           
           <nav className="flex space-x-1 bg-slate-100 p-1 rounded-xl">
              {[
-               { id: 'cashflow', label: 'Resumen Global', icon: BarChart3 },
+               { id: 'cashflow', label: 'Flujo de Caja', icon: BarChart3 },
                { id: 'garages', label: 'Red de Garajes', icon: Building2 },
-               { id: 'access', label: 'Equipo Global', icon: Users },
+               { id: 'access', label: 'Personal & Accesos', icon: Users },
              ].map((tab) => {
                const Icon = tab.icon;
                const isActive = activeTab === tab.id;
@@ -426,7 +504,7 @@ export default function OnboardingPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            {activeTab === 'cashflow' && 'Centro de Comando'}
+            {activeTab === 'cashflow' && 'Flujo de Caja'}
             {activeTab === 'garages' && 'Infraestructura'}
             {activeTab === 'access' && 'Gestión de Personal'}
           </h1>

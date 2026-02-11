@@ -6,8 +6,9 @@ export enum UserRole {
   SUPERADMIN = 'superadmin',
   OWNER = 'owner',
   MANAGER = 'manager',
-  AUDITOR = 'auditor',
-  OPERATOR = 'operador' // Matches PostgreSQL ENUM value exactly (lowercase)
+  ADMINISTRATIVE = 'administrative', // Nuevo
+  OPERATOR = 'operador', // Mantenemos el valor exacto de tu DB
+  AUDITOR = 'auditor' // Matches PostgreSQL ENUM value exactly (lowercase)
 }
 
 export enum LevelType {
