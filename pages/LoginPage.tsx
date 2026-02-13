@@ -1,9 +1,8 @@
+
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { 
-  Car, 
   Loader2, 
   Lock, 
   Mail, 
@@ -13,10 +12,9 @@ import {
   ShieldCheck, 
   KeyRound 
 } from 'lucide-react';
-import { UserRole } from '../types';
+import { UserRole, UserSession } from '../types';
 
 export default function LoginPage() {
-  const navigate = useNavigate();
   const { signInShadow } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
   
@@ -27,51 +25,11 @@ export default function LoginPage() {
   
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [retryStatus, setRetryStatus] = useState<string | null>(null);
-
-  // --- Utility: Delay Helper ---
-  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-  /**
-   * Obtiene el perfil del usuario con lógica de reintento.
-   * Crucial para manejar "Cold Starts" de Supabase donde el primer request RLS puede fallar (PGRST500).
-   */
-  const fetchProfileWithRetry = async (userId: string, attempt = 1): Promise<{ role: UserRole | null }> => {
-    try {
-      if (attempt > 1) {
-        setRetryStatus(`Verificando perfil (Intento ${attempt}/3)...`);
-      }
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-      
-      return { role: data.role };
-
-    } catch (err: any) {
-      // Identificar errores recuperables (Red o Esquema/PGRST500)
-      const isRecoverable = 
-        err.message?.includes('fetch') || 
-        err.code === 'PGRST500' || 
-        err.code === '500';
-      
-      if (isRecoverable && attempt < 3) {
-        await wait(1000 * attempt); // Backoff: 1s, 2s...
-        return fetchProfileWithRetry(userId, attempt + 1);
-      }
-      throw err; // Si no es recuperable o se acabaron los intentos
-    }
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
-    setRetryStatus(null);
 
     const isEmail = identifier.includes('@');
 
@@ -91,51 +49,30 @@ export default function LoginPage() {
         if (!authData.user) throw new Error("No se pudo crear el usuario.");
 
         // 2. Crear Perfil (Optimista)
-        const { error: profileError } = await supabase.from('profiles').insert({
+        await supabase.from('profiles').insert({
           id: authData.user.id,
           email: identifier,
           full_name: fullName,
           role: UserRole.OWNER
         });
-
-        if (profileError && profileError.code !== '23505') {
-           console.warn("Advertencia al crear perfil:", profileError.message);
-        }
-
-        // Redirigir a onboarding
-        navigate('/setup/onboarding', { replace: true });
+        
+        // El AuthProvider detectará el cambio de sesión automáticamente y App.tsx redirigirá.
 
       } else {
         // --- FLUJO DE LOGIN ---
         if (isEmail) {
-            // A. Login Standard (Supabase Auth)
-            const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+            // A. Login Standard (Supabase Auth - Owners/SuperAdmins)
+            const { error: signInError } = await supabase.auth.signInWithPassword({
               email: identifier,
               password,
             });
 
             if (signInError) throw signInError;
-            if (!authData.user) throw new Error("Sesión iniciada pero sin datos de usuario.");
-
-            // B. Determinar Rol y Redirección
-            try {
-              const { role } = await fetchProfileWithRetry(authData.user.id);
-              
-              if (role === UserRole.SUPERADMIN) {
-                navigate('/admin/global', { replace: true });
-              } else {
-                // Owner, Manager -> Setup/Onboarding para seleccionar garaje
-                navigate('/setup/onboarding', { replace: true });
-              }
-
-            } catch (profileErr) {
-              console.error("Error obteniendo rol tras login:", profileErr);
-              // Fallback Seguro: Si hay sesión pero falló el perfil, enviamos a onboarding
-              navigate('/setup/onboarding', { replace: true });
-            }
+            // Éxito: El listener de AuthProvider manejará el estado.
+            // App.tsx detectará el cambio y redirigirá.
 
         } else {
-            // B. Login Shadow (Empleados sin email)
+            // B. Login Shadow (Empleados - Managers/Admin/Operators)
             const { data, error } = await supabase.rpc('login_employee', {
               p_username: identifier,
               p_password: password
@@ -144,9 +81,19 @@ export default function LoginPage() {
             if (error) throw error;
             if (!data) throw new Error("Credenciales inválidas o usuario no encontrado.");
 
-            // Establecer sesión "sombra"
-            signInShadow(data);
-            navigate('/setup/onboarding', { replace: true });
+            // Construct Session Data
+            const sessionData: UserSession = {
+              ...data,
+              isShadow: true, 
+            };
+
+            // EJECUTAR CAMBIO DE ESTADO GLOBAL
+            // Esto actualiza el contexto. App.tsx detectará el cambio y ejecutará la redirección.
+            signInShadow(sessionData);
+            
+            // CRÍTICO: NO bajamos el loading local.
+            // Mantenemos el spinner hasta que el componente muera por la redirección global.
+            return;
         }
       }
       
@@ -158,7 +105,7 @@ export default function LoginPage() {
       if (msg.includes('rate limit')) msg = 'Demasiados intentos. Espera unos segundos.';
       
       setErrorMsg(msg);
-      setLoading(false); 
+      setLoading(false); // Solo bajamos loading si hubo error
     }
   };
 
@@ -252,7 +199,7 @@ export default function LoginPage() {
               {loading ? (
                 <>
                    <Loader2 className="h-5 w-5 animate-spin" />
-                   {retryStatus ? <span className="text-xs">{retryStatus}</span> : 'Validando...'}
+                   <span className="text-xs">Autenticando...</span>
                 </>
               ) : (
                 <>

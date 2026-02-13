@@ -6,9 +6,9 @@ export enum UserRole {
   SUPERADMIN = 'superadmin',
   OWNER = 'owner',
   MANAGER = 'manager',
-  ADMINISTRATIVE = 'administrative', // Nuevo
-  OPERATOR = 'operador', // Mantenemos el valor exacto de tu DB
-  AUDITOR = 'auditor' // Matches PostgreSQL ENUM value exactly (lowercase)
+  ADMINISTRATIVE = 'administrative',
+  OPERATOR = 'operador',
+  AUDITOR = 'auditor'
 }
 
 export enum LevelType {
@@ -27,14 +27,21 @@ export interface Profile {
   full_name: string | null;
 }
 
+// Nueva estructura de permisos JSONB
+export interface EmployeePermissions {
+  sections: string[]; // e.g. ['dashboard', 'precios', 'finanzas', 'ajustes', 'cashflow', 'access']
+  allowed_garages: string[]; // UUIDs de los garajes permitidos
+}
+
 export interface EmployeeAccount {
   id: string;
   owner_id: string;
-  garage_id?: string | null; // Optional: Null means Global Employee (Owner level)
+  // garage_id eliminado/deprecado en favor de permissions.allowed_garages
   username: string;
   first_name: string;
   last_name: string;
   role: UserRole;
+  permissions?: EmployeePermissions; // Columna JSONB crítica
   created_at?: string;
   // Join fields (Optional)
   garages?: {
@@ -163,6 +170,6 @@ export interface UserSession {
   role: UserRole;
   isShadow?: boolean; 
   owner_id?: string; // Reference to the Organization Owner (Boss)
-  garage_id?: string; // Optional: legacy or specific assignment
   username?: string;
+  permissions?: EmployeePermissions; // Added for Shadow Security logic
 }

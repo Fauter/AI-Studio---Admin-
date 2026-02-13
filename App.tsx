@@ -1,7 +1,8 @@
 
-import React, { useEffect, useState } from 'react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { MemoryRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -11,111 +12,114 @@ import PriceManagement from './pages/PriceManagement';
 import GlobalAdminPage from './pages/GlobalAdmin';
 import SettingsPage from './pages/SettingsPage';
 import AccessControlPage from './pages/AccessControlPage';
-import ConfigAdmin from './components/admin/ConfigAdmin'; // Added Import
+import ConfigAdmin from './components/admin/ConfigAdmin';
 import { UserRole } from './types';
 
 // --- Components ---
 
 const DashboardHome = () => (
-  <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
+  <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm animate-in fade-in">
     <h2 className="text-xl font-bold text-slate-900">Resumen Operativo</h2>
     <p className="text-slate-500 mt-2">Bienvenido al panel de control. Selecciona una opción del menú lateral para comenzar.</p>
   </div>
 );
 
-// MISION 2: Enrutamiento Inteligente & Seguro
-const RootRedirect = () => {
-  const { user, profile, loading, shadowUser } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // 1. Wait for Auth to settle
-    if (loading) return;
-    
-    // 2. No User -> Force Login
-    if (!user && !shadowUser) {
-      // Logic handled by AppRoutes fallback, but explicit checking here helps logic flow
-      return; 
-    }
-
-    // 3. Routing Logic
-    const routeUser = () => {
-      // A. Global Admin (Priority 1)
-      if (profile?.role === UserRole.SUPERADMIN) {
-        navigate('/admin/global', { replace: true });
-        return;
-      }
-
-      // B. Shadow Users / Employees (Priority 2)
-      // They must always go to onboarding/selector first to confirm context
-      if (shadowUser) {
-        navigate('/setup/onboarding', { replace: true });
-        return;
-      }
-
-      // C. Owners / Managers (Priority 3)
-      // Default to onboarding to select garage
-      navigate('/setup/onboarding', { replace: true });
-    };
-
-    routeUser();
-  }, [user, profile, loading, shadowUser, navigate]);
-
+// Componente visual simple para la raíz. La lógica real está en el Guardián de AppRoutes.
+const RootDispatcher = () => {
   return (
     <div className="flex h-screen items-center justify-center bg-slate-50">
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
-        <p className="text-sm text-slate-500 font-medium">Validando credenciales...</p>
+        <p className="text-sm text-slate-500 font-medium">Estableciendo entorno seguro...</p>
       </div>
     </div>
   );
 };
 
-// --- Main App Logic (Inside Router Context) ---
+// --- Main App Logic ---
 
 const AppRoutes = () => {
-  const { session, shadowUser, loading, signOut } = useAuth();
+  const { session, shadowUser, user, profile, loading, signOut } = useAuth();
+  const navigate = useNavigate();
   const [showReset, setShowReset] = useState(false);
+  
+  // REF: Controla que la redirección forzada ocurra SOLO UNA VEZ por sesión activa.
+  // Esto permite navegar dentro de la app sin ser pateado al inicio constantemente,
+  // pero asegura que un F5 o Login inicial respete la regla de entrada.
+  const hasRedirectedRef = useRef(false);
 
-  // Circuit Breaker for Infinite Loading
+  // --- GUARDIÁN GLOBAL DE NAVEGACIÓN ---
+  useEffect(() => {
+    // 1. Si no hay sesión, resetear el flag para permitir futura redirección al loguearse.
+    if (!loading && !user && !shadowUser) {
+        hasRedirectedRef.current = false;
+        return;
+    }
+
+    // 2. Esperar a que la autenticación termine de cargar.
+    if (loading) return;
+
+    // 3. Si ya redirigimos en esta sesión, no intervenir (permitir navegación SPA).
+    if (hasRedirectedRef.current) return;
+
+    // --- LÓGICA DE REDIRECCIÓN INICIAL (REGLA DE ORO) ---
+    
+    // CASO A: Shadow User (Empleados)
+    if (shadowUser) {
+        if (shadowUser.role === UserRole.ADMINISTRATIVE) {
+           const allowed = shadowUser.permissions?.allowed_garages || [];
+           if (allowed.length > 0) {
+              navigate(`/${allowed[0]}/dashboard`, { replace: true });
+           } else {
+              console.warn("Administrativo sin garajes asignados.");
+           }
+        } else {
+           // Managers -> Hub (Onboarding)
+           navigate('/setup/onboarding', { replace: true });
+        }
+    } 
+    // CASO B: Standard User (Owner / SuperAdmin)
+    else if (user && profile) {
+        if (profile.role === UserRole.SUPERADMIN) {
+           navigate('/admin/global', { replace: true });
+        } else {
+           // Owners -> Hub (Onboarding) - SIEMPRE, incluso con deep link.
+           navigate('/setup/onboarding', { replace: true });
+        }
+    }
+
+    // Marcar como redirigido para liberar la navegación interna
+    hasRedirectedRef.current = true;
+
+  }, [loading, user, shadowUser, profile, navigate]);
+
+  // Circuit Breaker
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (loading) {
-        setShowReset(true);
-      }
-    }, 7000); // 7 seconds timeout
+      if (loading) setShowReset(true);
+    }, 7000); 
     return () => clearTimeout(timer);
   }, [loading]);
 
   const handleHardReset = async () => {
     await signOut();
-    window.location.href = '/'; // Hard reload
+    window.location.href = '/'; 
   };
 
-  // --- Loading State (Elegante) ---
+  // 1. GLOBAL LOADING (Initial Check)
   if (loading) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-50 relative overflow-hidden">
-        {/* Background Decor */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
-
         <div className="relative z-10 flex flex-col items-center gap-6 p-8 bg-white/50 backdrop-blur-sm rounded-2xl border border-white/50 shadow-xl">
-          <div className="relative">
-            <div className="absolute inset-0 bg-indigo-500 rounded-full blur-md opacity-20 animate-pulse"></div>
-            <Loader2 className="h-12 w-12 animate-spin text-indigo-600 relative z-10" />
-          </div>
-          
+          <Loader2 className="h-12 w-12 animate-spin text-indigo-600 relative z-10" />
           <div className="text-center space-y-2">
             <h3 className="text-lg font-bold text-slate-800 tracking-tight">GarageIA</h3>
             <p className="text-sm text-slate-500 font-medium animate-pulse">Iniciando sistema seguro...</p>
           </div>
-
           {showReset && (
             <div className="mt-4 pt-4 border-t border-slate-200 w-full animate-in fade-in slide-in-from-bottom-4">
-               <button 
-                onClick={handleHardReset}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-lg text-xs font-bold transition-all shadow-sm"
-              >
+               <button onClick={handleHardReset} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-lg text-xs font-bold transition-all shadow-sm">
                 <RefreshCw className="h-3 w-3" /> Reiniciar Conexión
               </button>
             </div>
@@ -125,16 +129,15 @@ const AppRoutes = () => {
     );
   }
 
-  // --- Unauthenticated View ---
-  // Checks both Supabase Session AND Shadow Session
+  // 2. UNAUTHENTICATED STATE
   if (!session && !shadowUser) {
     return <LoginPage />;
   }
 
-  // --- Authenticated Routing ---
+  // 3. AUTHENTICATED ROUTES
   return (
     <Routes>
-      <Route path="/" element={<RootRedirect />} />
+      <Route path="/" element={<RootDispatcher />} />
       <Route path="/setup/onboarding" element={<OnboardingPage />} />
       
       {/* GLOBAL ADMIN ROUTES */}
@@ -153,20 +156,22 @@ const AppRoutes = () => {
          <Route path="precios" element={<PriceManagement />} />
          <Route path="accesos" element={<AccessControlPage />} />
          <Route path="ajustes" element={<SettingsPage />} />
-         <Route path="*" element={<div className="p-8 text-slate-500">Sección no encontrada.</div>} />
+         <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>
       
-      <Route path="*" element={<RootRedirect />} />
+      {/* Global Catch-all */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };
 
-// --- Root App Component ---
 function App() {
   return (
-    <MemoryRouter>
-      <AppRoutes />
-    </MemoryRouter>
+    <AuthProvider>
+      <MemoryRouter>
+        <AppRoutes />
+      </MemoryRouter>
+    </AuthProvider>
   );
 }
 
