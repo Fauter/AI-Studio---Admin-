@@ -13,13 +13,15 @@ import {
     Car,
     Clock,
     AlertCircle,
-    Inbox
+    Inbox,
+    X
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Garage } from '../../types';
 import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
 import SectionHeader from './SectionHeader';
+import { useAuth } from '../../hooks/useAuth';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
     return twMerge(clsx(inputs));
@@ -36,7 +38,8 @@ interface Movement {
     payment_method?: string; // 'EFECTIVO', 'MERCADOPAGO', etc.
     timestamp: string; // ISO String
     ticket_number?: string;
-    operator_name?: string; // Nombre del operador que hizo el cobro (si existe)
+    operator?: string; // Nombre del operador que hizo el cobro (si existe)
+    operator_name?: string; // Mantenido por compatibilidad
     vehicle_type?: string;
     notes?: string;
     related_entity_id?: string | null;
@@ -58,6 +61,7 @@ interface CashFlowHubProps {
 }
 
 export default function CashFlowHub({ garages }: CashFlowHubProps) {
+    const { profile } = useAuth();
     const [view, setView] = useState<'caja' | 'ingresos'>('caja');
     const [selectedGarageId, setSelectedGarageId] = useState<string>('all');
     const [movements, setMovements] = useState<Movement[]>([]);
@@ -66,6 +70,17 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const [vehicles, setVehicles] = useState<{ plate: string; type: string; is_subscriber?: boolean }[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    const [filters, setFilters] = useState({
+        operatorId: '',
+        paymentMethod: '',
+        vehicleType: '',
+        tariffType: '',
+        exactDate: '',
+        startDate: '',
+        endDate: ''
+    });
+    const [employees, setEmployees] = useState<{ id: string, full_name: string }[]>([]);
 
     // --- 1. Data Fetching ---
 
@@ -130,7 +145,20 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
                 if (vehiclesError) throw vehiclesError;
 
+                // Fetch Employees
+                let empData: any[] = [];
+                if (profile?.id) {
+                    const { data: eData, error: eError } = await supabase
+                        .from('employee_accounts')
+                        .select('id, full_name')
+                        .eq('owner_id', profile.id)
+                        .eq('active', true);
+
+                    if (!eError && eData) empData = eData;
+                }
+
                 setVehicles(vehiclesData || []);
+                setEmployees(empData);
                 setMovements(loadedMovements);
                 setStays(staysData as Stay[]);
                 setHistoricalStays(historicalStaysData);
@@ -144,7 +172,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         };
 
         fetchData();
-    }, [garages]); // Re-fetch si cambian los permisos/garajes
+    }, [garages, profile?.id]); // Re-fetch si cambian los permisos/garajes
 
     // --- 2. Filtering & Computing KPIs ---
 
@@ -172,15 +200,96 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         return map;
     }, [vehicles]);
 
+    const uniqueVehicleTypes = useMemo(() => {
+        const types = new Set<string>();
+        vehicles.forEach(v => {
+            if (v.type) types.add(v.type.toUpperCase());
+        });
+        return Array.from(types).sort();
+    }, [vehicles]);
+
     const filteredMovements = useMemo(() => {
-        if (selectedGarageId === 'all') return movements;
-        return movements.filter(m => m.garage_id === selectedGarageId);
-    }, [selectedGarageId, movements]);
+        let result = movements;
+        if (selectedGarageId !== 'all') {
+            result = result.filter(m => m.garage_id === selectedGarageId);
+        }
+
+        if (filters.operatorId) {
+            const selectedEmployeeName = employees.find(e => e.id === filters.operatorId)?.full_name;
+            if (selectedEmployeeName) {
+                result = result.filter(m =>
+                    m.operator === selectedEmployeeName ||
+                    m.operator_name === selectedEmployeeName
+                );
+            }
+        }
+
+        if (filters.paymentMethod) {
+            result = result.filter(m => m.payment_method?.toUpperCase().includes(filters.paymentMethod.toUpperCase()));
+        }
+
+        if (filters.tariffType) {
+            if (filters.tariffType === 'Hora') result = result.filter(m => m.type === 'CobroEstadia');
+            else if (filters.tariffType === 'Abono') result = result.filter(m => m.type === 'CobroAbono');
+            else if (filters.tariffType === 'Anticipado') result = result.filter(m => m.type === 'CobroAnticipado');
+        }
+
+        if (filters.vehicleType) {
+            result = result.filter(m => {
+                const inferredType = (m.plate && vehicleTypesMap[m.plate])
+                    ? vehicleTypesMap[m.plate]
+                    : m.vehicle_type;
+                return inferredType?.toUpperCase() === filters.vehicleType.toUpperCase();
+            });
+        }
+
+        if (filters.exactDate) {
+            result = result.filter(m => m.timestamp.startsWith(filters.exactDate));
+        } else {
+            if (filters.startDate) {
+                const start = new Date(filters.startDate + 'T00:00:00').getTime();
+                result = result.filter(m => new Date(m.timestamp).getTime() >= start);
+            }
+            if (filters.endDate) {
+                // Configurar al final del día
+                const end = new Date(filters.endDate + 'T00:00:00');
+                end.setHours(23, 59, 59, 999);
+                result = result.filter(m => new Date(m.timestamp).getTime() <= end.getTime());
+            }
+        }
+
+        return result;
+    }, [selectedGarageId, movements, filters, employees, vehicleTypesMap]);
 
     const filteredStays = useMemo(() => {
-        if (selectedGarageId === 'all') return stays;
-        return stays.filter(s => s.garage_id === selectedGarageId);
-    }, [selectedGarageId, stays]);
+        let result = stays;
+        if (selectedGarageId !== 'all') {
+            result = result.filter(s => s.garage_id === selectedGarageId);
+        }
+
+        if (filters.vehicleType) {
+            result = result.filter(s => {
+                const inferredType = vehicleTypesMap[s.plate] || s.vehicle_type;
+                return inferredType?.toUpperCase() === filters.vehicleType.toUpperCase();
+            });
+        }
+
+        if (filters.exactDate) {
+            result = result.filter(s => s.entry_time.startsWith(filters.exactDate));
+        } else {
+            if (filters.startDate) {
+                const start = new Date(filters.startDate + 'T00:00:00').getTime();
+                result = result.filter(s => new Date(s.entry_time).getTime() >= start);
+            }
+            if (filters.endDate) {
+                const end = new Date(filters.endDate + 'T00:00:00');
+                end.setHours(23, 59, 59, 999);
+                result = result.filter(s => new Date(s.entry_time).getTime() <= end.getTime());
+            }
+        }
+
+        return result;
+    }, [selectedGarageId, stays, filters, vehicleTypesMap]);
 
     const totalCaja = useMemo(() => {
         return filteredMovements.reduce((acc, move) => acc + Number(move.amount || 0), 0);
@@ -296,165 +405,301 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             </SectionHeader>
 
             {/* 2. Contenido Principal Vistas */}
-            <div>
-                {/* Vista: CAJA */}
-                {view === 'caja' && (
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
-                        <div className="flex-1 overflow-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-500 uppercase bg-white sticky top-0 z-10 shadow-sm">
-                                    <tr>
-                                        <th className="px-4 py-2.5 font-semibold">Garaje</th>
-                                        <th className="px-4 py-2.5 font-semibold">Patente</th>
-                                        <th className="px-4 py-2.5 font-semibold">Hora</th>
-                                        <th className="px-4 py-2.5 font-semibold">Descripción</th>
-                                        <th className="px-4 py-2.5 font-semibold">Método de Pago</th>
-                                        <th className="px-4 py-2.5 font-semibold">Factura</th>
-                                        <th className="px-4 py-2.5 font-semibold text-right">Monto</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {filteredMovements.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={7} className="p-8 text-center text-slate-400 text-sm">
-                                                No hay movimientos registrados en este período.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        filteredMovements.map(move => {
-                                            return (
-                                                <tr key={move.id} className="hover:bg-indigo-50/30 transition-colors">
-                                                    <td className="px-4 py-2">
-                                                        <span className="font-medium text-slate-600 text-xs">{getGarageName(move.garage_id)}</span>
-                                                    </td>
-                                                    <td className="px-4 py-2">
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold font-mono text-slate-800">{move.plate || '---'}</span>
-                                                            <span className="text-[10px] text-slate-400 uppercase">
-                                                                {(move.plate && vehicleTypesMap[move.plate])
-                                                                    ? vehicleTypesMap[move.plate]
-                                                                    : (move.vehicle_type || 'Vehículo')}
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-2 text-left text-xs font-medium">
-                                                        {move.type === 'CobroEstadia' && move.related_entity_id && staysLookup[move.related_entity_id] ? (
-                                                            <div className="flex flex-col items-start gap-0.5">
-                                                                <div className="flex items-center gap-1 text-slate-500 text-[10px]">
-                                                                    <ArrowUpRight className="h-3 w-3 opacity-60" />
-                                                                    <span>{formatDate(staysLookup[move.related_entity_id].entry_time)}</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1 text-slate-700">
-                                                                    <ArrowDownRight className="h-3 w-3 opacity-60" />
-                                                                    <span>{formatDate(staysLookup[move.related_entity_id].exit_time || move.timestamp)}</span>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-slate-500">{formatDate(move.timestamp)}</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-2">
-                                                        <span className="text-sm text-slate-600">{cleanDescription(move.notes)}</span>
-                                                    </td>
-                                                    <td className="px-4 py-2">
-                                                        <span className="text-xs text-slate-500 font-medium">{move.payment_method ? move.payment_method.toUpperCase() : '---'}</span>
-                                                    </td>
-                                                    <td className="px-4 py-2">
-                                                        {move.invoice_type ? (
-                                                            <span className="px-2 py-0.5 bg-slate-100 text-[10px] font-bold text-slate-600 rounded-md uppercase">
-                                                                {move.invoice_type}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-xs text-slate-400">---</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-2 text-right font-bold font-mono text-slate-800">
-                                                        {formatCurrency(move.amount)}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
+
+                {/* Sidebar Filtros */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 h-fit space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                            <Filter className="h-4 w-4 text-indigo-500" />
+                            Filtros
+                        </h3>
+                        {Object.values(filters).some(v => v !== '') && (
+                            <button
+                                onClick={() => setFilters({ operatorId: '', paymentMethod: '', vehicleType: '', tariffType: '', exactDate: '', startDate: '', endDate: '' })}
+                                className="text-xs text-slate-500 hover:text-indigo-600 font-medium transition-colors flex items-center gap-1"
+                            >
+                                <X className="h-3 w-3" /> Limpiar
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="space-y-4">
+                        {/* 1. Operador (Solo Caja) */}
+                        {view === 'caja' && (
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Operador</label>
+                                <select
+                                    value={filters.operatorId}
+                                    onChange={(e) => setFilters(prev => ({ ...prev, operatorId: e.target.value }))}
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                >
+                                    <option value="">Todos</option>
+                                    {employees.map(emp => (
+                                        <option key={emp.id} value={emp.id}>{emp.full_name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* 2. Método de Pago (Solo Caja) */}
+                        {view === 'caja' && (
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Método de Pago</label>
+                                <select
+                                    value={filters.paymentMethod}
+                                    onChange={(e) => setFilters(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                >
+                                    <option value="">Todos</option>
+                                    <option value="EFECTIVO">Efectivo</option>
+                                    <option value="TRANSFERENCIA">Transferencia</option>
+                                    <option value="DEBITO">Débito</option>
+                                    <option value="CREDITO">Crédito</option>
+                                    <option value="QR">QR</option>
+                                </select>
+                            </div>
+                        )}
+
+                        {/* 3. Tipo de Vehículo (Siempre visible) */}
+                        <div className={view === 'caja' ? "pt-3 border-t border-slate-100" : ""}>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Tipo de Vehículo</label>
+                            <select
+                                value={filters.vehicleType}
+                                onChange={(e) => setFilters(prev => ({ ...prev, vehicleType: e.target.value }))}
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                            >
+                                <option value="">Todos</option>
+                                {uniqueVehicleTypes.map(type => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* 4. Tipo de Tarifa (Solo Caja) */}
+                        {view === 'caja' && (
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Tipo de Tarifa</label>
+                                <select
+                                    value={filters.tariffType}
+                                    onChange={(e) => setFilters(prev => ({ ...prev, tariffType: e.target.value }))}
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                >
+                                    <option value="">Todas</option>
+                                    <option value="Hora">Hora / Estadía</option>
+                                    <option value="Abono">Abono</option>
+                                    <option value="Anticipado">Anticipado</option>
+                                </select>
+                            </div>
+                        )}
+
+                        {/* 5. Fecha Exacta y 6. Desde/Hasta (Siempre visible) */}
+                        <div className="pt-3 border-t border-slate-100 space-y-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Fecha Exacta</label>
+                                <input
+                                    type="date"
+                                    value={filters.exactDate}
+                                    onChange={(e) => setFilters(prev => ({ ...prev, exactDate: e.target.value, startDate: '', endDate: '' }))}
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                />
+                            </div>
+
+                            {!filters.exactDate && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1">Desde</label>
+                                        <input
+                                            type="date"
+                                            value={filters.startDate}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1">Hasta</label>
+                                        <input
+                                            type="date"
+                                            value={filters.endDate}
+                                            onChange={(e) => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
-                )}
+                </div>
 
-                {/* Vista: INGRESOS */}
-                {view === 'ingresos' && (
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
-                        <div className="flex-1 overflow-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-500 uppercase bg-white sticky top-0 z-10 shadow-sm">
-                                    <tr>
-                                        <th className="px-4 py-2.5 font-semibold">Garaje</th>
-                                        <th className="px-4 py-2.5 font-semibold">Patente</th>
-                                        <th className="px-4 py-2.5 font-semibold">Tipo</th>
-                                        <th className="px-4 py-2.5 font-semibold">Entrada</th>
-                                        <th className="px-4 py-2.5 font-semibold text-center">Abonado</th>
-                                        <th className="px-4 py-2.5 font-semibold text-right">Tiempo</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {filteredStays.length === 0 ? (
+                {/* Vistas (Tablas) */}
+                <div className="lg:col-span-3">
+                    {/* Vista: CAJA */}
+                    {view === 'caja' && (
+                        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
+                            <div className="flex-1 overflow-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-slate-500 uppercase bg-white sticky top-0 z-10 shadow-sm">
                                         <tr>
-                                            <td colSpan={6} className="p-8 text-center text-slate-400 text-sm">
-                                                <div className="flex flex-col items-center justify-center">
-                                                    <Car className="h-8 w-8 mb-2 opacity-20" />
-                                                    <p>Todo tranquilo.</p>
-                                                    <p className="text-xs">No hay vehículos activos ahora mismo.</p>
-                                                </div>
-                                            </td>
+                                            <th className="px-3 py-2.5 font-semibold">Garaje</th>
+                                            <th className="px-3 py-2.5 font-semibold">Patente</th>
+                                            <th className="px-3 py-2.5 font-semibold">Hora</th>
+                                            <th className="px-3 py-2.5 font-semibold">Descripción</th>
+                                            <th className="px-3 py-2.5 font-semibold">Operador</th>
+                                            <th className="px-3 py-2.5 font-semibold">Método de Pago</th>
+                                            <th className="px-3 py-2.5 font-semibold">Factura</th>
+                                            <th className="px-3 py-2.5 font-semibold text-right">Monto</th>
                                         </tr>
-                                    ) : (
-                                        filteredStays.map(stay => (
-                                            <tr key={stay.id} className="hover:bg-indigo-50/30 transition-colors">
-                                                <td className="px-4 py-3">
-                                                    <span className="font-medium text-slate-600 text-xs">{getGarageName(stay.garage_id)}</span>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="font-bold font-mono text-slate-800">{stay.plate}</span>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="h-6 w-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-[10px] uppercase">
-                                                            {stay.vehicle_type?.[0] || 'V'}
-                                                        </div>
-                                                        <span className="text-xs text-slate-500 uppercase">
-                                                            {(vehicleTypesMap[stay.plate] || stay.vehicle_type || 'Vehículo')}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="text-xs text-slate-600 font-medium">{formatDate(stay.entry_time)}</span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    {subscriberMap[stay.plate] ? (
-                                                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md text-[10px] font-bold">
-                                                            SÍ
-                                                        </span>
-                                                    ) : (
-                                                        <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[10px] font-bold">
-                                                            NO
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-right">
-                                                    <span className="inline-block text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md text-right">
-                                                        {getTimeElapsed(stay.entry_time)}
-                                                    </span>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {filteredMovements.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={8} className="p-8 text-center text-slate-400 text-sm">
+                                                    No hay movimientos registrados en este período.
                                                 </td>
                                             </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
+                                        ) : (
+                                            filteredMovements.map(move => {
+                                                return (
+                                                    <tr key={move.id} className="hover:bg-indigo-50/30 transition-colors">
+                                                        <td className="px-3 py-2">
+                                                            <span className="font-medium text-slate-600 text-xs">{getGarageName(move.garage_id)}</span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-bold font-mono text-slate-800">{move.plate || '---'}</span>
+                                                                <span className="text-[10px] text-slate-400 uppercase">
+                                                                    {(move.plate && vehicleTypesMap[move.plate])
+                                                                        ? vehicleTypesMap[move.plate]
+                                                                        : (move.vehicle_type || 'Vehículo')}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-left text-xs font-medium">
+                                                            {move.type === 'CobroEstadia' && move.related_entity_id && staysLookup[move.related_entity_id] ? (
+                                                                <div className="flex flex-col items-start gap-0.5">
+                                                                    <div className="flex items-center gap-1 text-slate-500 text-[10px]">
+                                                                        <ArrowUpRight className="h-3 w-3 opacity-60" />
+                                                                        <span>{formatDate(staysLookup[move.related_entity_id].entry_time)}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1 text-slate-700">
+                                                                        <ArrowDownRight className="h-3 w-3 opacity-60" />
+                                                                        <span>{formatDate(staysLookup[move.related_entity_id].exit_time || move.timestamp)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-slate-500">{formatDate(move.timestamp)}</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span className="text-sm text-slate-600">{cleanDescription(move.notes)}</span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span className={cn(
+                                                                "text-xs font-medium",
+                                                                (!move.operator || move.operator === 'Sistema') ? "text-slate-500 opacity-60" : "text-slate-500"
+                                                            )}>
+                                                                {move.operator || move.operator_name || 'Sistema'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span className="text-xs text-slate-500 font-medium">{move.payment_method ? move.payment_method.toUpperCase() : '---'}</span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {move.invoice_type ? (
+                                                                <span className="px-2 py-0.5 bg-slate-100 text-[10px] font-bold text-slate-600 rounded-md uppercase">
+                                                                    {move.invoice_type}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-xs text-slate-400">---</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right font-bold font-mono text-slate-800">
+                                                            {formatCurrency(move.amount)}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
-                )}
-            </div>
+                    )}
 
+                    {/* Vista: INGRESOS */}
+                    {view === 'ingresos' && (
+                        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
+                            <div className="flex-1 overflow-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-slate-500 uppercase bg-white sticky top-0 z-10 shadow-sm">
+                                        <tr>
+                                            <th className="px-4 py-2.5 font-semibold">Garaje</th>
+                                            <th className="px-4 py-2.5 font-semibold">Patente</th>
+                                            <th className="px-4 py-2.5 font-semibold">Tipo</th>
+                                            <th className="px-4 py-2.5 font-semibold">Entrada</th>
+                                            <th className="px-4 py-2.5 font-semibold text-center">Abonado</th>
+                                            <th className="px-4 py-2.5 font-semibold text-right">Tiempo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {filteredStays.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} className="p-8 text-center text-slate-400 text-sm">
+                                                    <div className="flex flex-col items-center justify-center">
+                                                        <Car className="h-8 w-8 mb-2 opacity-20" />
+                                                        <p>Todo tranquilo.</p>
+                                                        <p className="text-xs">No hay vehículos activos ahora mismo.</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            filteredStays.map(stay => (
+                                                <tr key={stay.id} className="hover:bg-indigo-50/30 transition-colors">
+                                                    <td className="px-4 py-3">
+                                                        <span className="font-medium text-slate-600 text-xs">{getGarageName(stay.garage_id)}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="font-bold font-mono text-slate-800">{stay.plate}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-6 w-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-[10px] uppercase">
+                                                                {stay.vehicle_type?.[0] || 'V'}
+                                                            </div>
+                                                            <span className="text-xs text-slate-500 uppercase">
+                                                                {(vehicleTypesMap[stay.plate] || stay.vehicle_type || 'Vehículo')}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="text-xs text-slate-600 font-medium">{formatDate(stay.entry_time)}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {subscriberMap[stay.plate] ? (
+                                                            <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                                                SÍ
+                                                            </span>
+                                                        ) : (
+                                                            <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                                                NO
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <span className="inline-block text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md text-right">
+                                                            {getTimeElapsed(stay.entry_time)}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
