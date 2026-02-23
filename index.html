@@ -1,37 +1,38 @@
 <!DOCTYPE html>
 <html lang="es" class="h-full bg-slate-50">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GarageIA Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              primary: {
-                50: '#eef2ff',
-                100: '#e0e7ff',
-                500: '#6366f1', // Indigo 500
-                600: '#4f46e5',
-                700: '#4338ca',
-                900: '#312e81',
-              },
-              slate: {
-                800: '#1e293b',
-                900: '#0f172a', // Deep background
-                950: '#020617',
-              }
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GarageIA Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1', // Indigo 500
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
             },
-            fontFamily: {
-              sans: ['Inter', 'system-ui', 'sans-serif'],
+            slate: {
+              800: '#1e293b',
+              900: '#0f172a', // Deep background
+              950: '#020617',
             }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
           }
         }
       }
-    </script>
-    <script type="importmap">
+    }
+  </script>
+  <script type="importmap">
     {
       "imports": {
         "react": "https://esm.sh/react@^19.2.4",
@@ -47,9 +48,10 @@
     </script>
   <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="h-full antialiased text-slate-900">
-    <div id="root" class="h-full"></div>
-    <script type="module" src="./index.tsx"></script>
+
+<body class="h-full antialiased text-slate-900">
+  <div id="root" class="h-full"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
+
 </html>

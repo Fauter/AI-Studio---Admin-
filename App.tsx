@@ -42,7 +42,7 @@ const AppRoutes = () => {
   const { session, shadowUser, user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const [showReset, setShowReset] = useState(false);
-  
+
   // REF: Controla que la redirección forzada ocurra SOLO UNA VEZ por sesión activa.
   // Esto permite navegar dentro de la app sin ser pateado al inicio constantemente,
   // pero asegura que un F5 o Login inicial respete la regla de entrada.
@@ -52,40 +52,44 @@ const AppRoutes = () => {
   useEffect(() => {
     // 1. Si no hay sesión, resetear el flag para permitir futura redirección al loguearse.
     if (!loading && !user && !shadowUser) {
-        hasRedirectedRef.current = false;
-        return;
+      hasRedirectedRef.current = false;
+      return;
     }
 
     // 2. Esperar a que la autenticación termine de cargar.
     if (loading) return;
 
+    // PREVENIR COLISIÓN: Si hay usuario pero el perfil aún no carga, esperar.
+    // Evita quemar el hasRedirectedRef prematuramente dejándonos en RootDispatcher (loading infinito).
+    if (user && !profile) return;
+
     // 3. Si ya redirigimos en esta sesión, no intervenir (permitir navegación SPA).
     if (hasRedirectedRef.current) return;
 
     // --- LÓGICA DE REDIRECCIÓN INICIAL (REGLA DE ORO) ---
-    
+
     // CASO A: Shadow User (Empleados)
     if (shadowUser) {
-        if (shadowUser.role === UserRole.ADMINISTRATIVE) {
-           const allowed = shadowUser.permissions?.allowed_garages || [];
-           if (allowed.length > 0) {
-              navigate(`/${allowed[0]}/dashboard`, { replace: true });
-           } else {
-              console.warn("Administrativo sin garajes asignados.");
-           }
+      if (shadowUser.role === UserRole.ADMINISTRATIVE) {
+        const allowed = shadowUser.permissions?.allowed_garages || [];
+        if (allowed.length > 0) {
+          navigate(`/${allowed[0]}/dashboard`, { replace: true });
         } else {
-           // Managers -> Hub (Onboarding)
-           navigate('/setup/onboarding', { replace: true });
+          console.warn("Administrativo sin garajes asignados.");
         }
-    } 
+      } else {
+        // Managers -> Hub (Onboarding)
+        navigate('/setup/onboarding', { replace: true });
+      }
+    }
     // CASO B: Standard User (Owner / SuperAdmin)
     else if (user && profile) {
-        if (profile.role === UserRole.SUPERADMIN) {
-           navigate('/admin/global', { replace: true });
-        } else {
-           // Owners -> Hub (Onboarding) - SIEMPRE, incluso con deep link.
-           navigate('/setup/onboarding', { replace: true });
-        }
+      if (profile.role === UserRole.SUPERADMIN) {
+        navigate('/admin/global', { replace: true });
+      } else {
+        // Owners -> Hub (Onboarding) - SIEMPRE, incluso con deep link.
+        navigate('/setup/onboarding', { replace: true });
+      }
     }
 
     // Marcar como redirigido para liberar la navegación interna
@@ -97,17 +101,33 @@ const AppRoutes = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (loading) setShowReset(true);
-    }, 7000); 
+    }, 7000);
     return () => clearTimeout(timer);
   }, [loading]);
 
   const handleHardReset = async () => {
-    await signOut();
-    window.location.href = '/'; 
+    // Proactively clean all possible caches and storages before network request
+    try {
+      sessionStorage.removeItem('garage_shadow_user');
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('sb-')) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (e) {
+      console.warn('Error clearing storage:', e);
+    }
+
+    // Fire and forget signOut to avoid hanging on network error
+    signOut().catch(() => { });
+
+    window.location.replace('/');
   };
 
   // 1. GLOBAL LOADING (Initial Check)
-  if (loading) {
+  // Only show loader if we have NO previous session data while loading
+  if (loading && !session && !shadowUser) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-50 relative overflow-hidden">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
@@ -119,7 +139,7 @@ const AppRoutes = () => {
           </div>
           {showReset && (
             <div className="mt-4 pt-4 border-t border-slate-200 w-full animate-in fade-in slide-in-from-bottom-4">
-               <button onClick={handleHardReset} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-lg text-xs font-bold transition-all shadow-sm">
+              <button onClick={handleHardReset} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-lg text-xs font-bold transition-all shadow-sm">
                 <RefreshCw className="h-3 w-3" /> Reiniciar Conexión
               </button>
             </div>
@@ -139,26 +159,26 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/" element={<RootDispatcher />} />
       <Route path="/setup/onboarding" element={<OnboardingPage />} />
-      
+
       {/* GLOBAL ADMIN ROUTES */}
       <Route path="/admin/global" element={<DashboardLayout />}>
-         <Route index element={<GlobalAdminPage />} />
-         <Route path="config" element={
-            <ConfigAdmin onSystemReset={() => { window.location.href = '/admin/global'; }} />
-         } />
+        <Route index element={<GlobalAdminPage />} />
+        <Route path="config" element={
+          <ConfigAdmin onSystemReset={() => { window.location.href = '/admin/global'; }} />
+        } />
       </Route>
 
       {/* GARAGE CONTEXT ROUTES */}
       <Route path="/:garageId" element={<DashboardLayout />}>
-         <Route index element={<DashboardHome />} />
-         <Route path="dashboard" element={<DashboardHome />} />
-         <Route path="finanzas" element={<PenaltyConfigPage />} />
-         <Route path="precios" element={<PriceManagement />} />
-         <Route path="accesos" element={<AccessControlPage />} />
-         <Route path="ajustes" element={<SettingsPage />} />
-         <Route path="*" element={<Navigate to="dashboard" replace />} />
+        <Route index element={<DashboardHome />} />
+        <Route path="dashboard" element={<DashboardHome />} />
+        <Route path="finanzas" element={<PenaltyConfigPage />} />
+        <Route path="precios" element={<PriceManagement />} />
+        <Route path="accesos" element={<AccessControlPage />} />
+        <Route path="ajustes" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>
-      
+
       {/* Global Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

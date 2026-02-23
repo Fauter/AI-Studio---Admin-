@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
 import { Profile, UserRole, UserSession } from '../types';
@@ -26,7 +26,7 @@ const _fetchDbProfile = async (userId: string, authUser: User): Promise<Profile>
     .maybeSingle();
 
   if (dbError && dbError.code !== 'PGRST116') {
-     console.warn('[Auth] DB Profile Fetch Warning:', dbError.message);
+    console.warn('[Auth] DB Profile Fetch Warning:', dbError.message);
   }
 
   if (data) return data as Profile;
@@ -34,10 +34,10 @@ const _fetchDbProfile = async (userId: string, authUser: User): Promise<Profile>
   // Fallback Metadata Strategy
   const meta = authUser.user_metadata || {};
   return {
-      id: userId,
-      email: authUser.email || null,
-      full_name: meta.full_name || 'Usuario',
-      role: (meta.role as UserRole) || UserRole.OWNER
+    id: userId,
+    email: authUser.email || null,
+    full_name: meta.full_name || 'Usuario',
+    role: (meta.role as UserRole) || UserRole.OWNER
   };
 };
 
@@ -46,9 +46,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [shadowUser, setShadowUser] = useState<UserSession | null>(null);
-  
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const profileRef = useRef<Profile | null>(null);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     let mounted = true;
@@ -56,17 +61,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const initAuth = async () => {
       try {
         setLoading(true);
-        
+
         // 1. Check Standard Session (Supabase Auth)
         const { data: { session: sbSession }, error: sbError } = await supabase.auth.getSession();
         if (sbError) throw sbError;
 
         if (sbSession) {
           if (mounted) {
+            // Set preliminary profile from metadata FIRST so Dashboard responds instantly
+            setProfile({
+              id: sbSession.user.id,
+              email: sbSession.user.email || null,
+              full_name: sbSession.user.user_metadata?.full_name || 'Usuario',
+              role: (sbSession.user.user_metadata?.role as UserRole) || UserRole.OWNER
+            });
+
             setSession(sbSession);
             setUser(sbSession.user);
-            const userProfile = await _fetchDbProfile(sbSession.user.id, sbSession.user);
-            setProfile(userProfile);
+
+            // Fetch real DB profile asynchronously
+            _fetchDbProfile(sbSession.user.id, sbSession.user)
+              .then(userProfile => {
+                if (mounted) setProfile(userProfile);
+              })
+              .catch(e => console.warn('[Auth] Async DB Profile Fetch Error:', e));
           }
         } else {
           // 2. Check Shadow Session (SessionStorage)
@@ -79,7 +97,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 // Construct Profile from Session Data (NO DB CALL)
                 setProfile({
                   id: parsed.id,
-                  email: null, 
+                  email: null,
                   full_name: parsed.full_name,
                   role: parsed.role
                 });
@@ -93,9 +111,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch (err: any) {
         console.error("[Auth] Init Failed:", err.message);
         if (mounted) {
-           setSession(null);
-           setShadowUser(null);
-           setProfile(null);
+          setSession(null);
+          setShadowUser(null);
+          setProfile(null);
         }
       } finally {
         if (mounted) setLoading(false);
@@ -107,7 +125,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Listener for Standard Auth Changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
-      
+
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
@@ -115,18 +133,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setShadowUser(null);
         setLoading(false);
       } else if (event === 'SIGNED_IN' && newSession) {
-         setLoading(true);
-         setSession(newSession);
-         setUser(newSession.user);
-         setShadowUser(null); 
-         sessionStorage.removeItem('garage_shadow_user');
-         
-         const userProfile = await _fetchDbProfile(newSession.user.id, newSession.user);
-         setProfile(userProfile);
-         setLoading(false);
+        const hasProfile = !!profileRef.current;
+
+        if (!hasProfile) {
+          setLoading(true);
+        }
+
+        // Optimistic profile First
+        setProfile(prev => prev || {
+          id: newSession.user.id,
+          email: newSession.user.email || null,
+          full_name: newSession.user.user_metadata?.full_name || 'Usuario',
+          role: (newSession.user.user_metadata?.role as UserRole) || UserRole.OWNER
+        });
+
+        setSession(newSession);
+        setUser(newSession.user);
+        setShadowUser(null);
+        sessionStorage.removeItem('garage_shadow_user');
+
+        if (!hasProfile) {
+          setLoading(false);
+        }
+
+        _fetchDbProfile(newSession.user.id, newSession.user)
+          .then(userProfile => {
+            if (mounted) setProfile(userProfile);
+          })
+          .catch(e => console.warn('[Auth] Async DB Profile Fetch Error:', e));
       } else if (newSession) {
-         setSession(newSession);
-         setUser(newSession.user);
+        setSession(newSession);
+        setUser(newSession.user);
+        setProfile(prev => prev || {
+          id: newSession.user.id,
+          email: newSession.user.email || null,
+          full_name: newSession.user.user_metadata?.full_name || 'Usuario',
+          role: (newSession.user.user_metadata?.role as UserRole) || UserRole.OWNER
+        });
       }
     });
 
@@ -141,8 +184,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
 
     // 1. Persistencia
-    try { 
-      sessionStorage.setItem('garage_shadow_user', JSON.stringify(sUser)); 
+    try {
+      sessionStorage.setItem('garage_shadow_user', JSON.stringify(sUser));
     } catch (e) {
       console.error("Storage Error", e);
     }
@@ -167,16 +210,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signOut = async () => {
     setLoading(true);
     try {
-        await supabase.auth.signOut();
-        try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) {}
+      try { sessionStorage.removeItem('garage_shadow_user'); } catch (e) { }
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('sb-')) localStorage.removeItem(key);
+        }
+      } catch (e) { }
+
+      await Promise.race([
+        supabase.auth.signOut(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('SignOut Timeout')), 3000))
+      ]);
     } catch (err) {
-      console.error('SignOut error:', err);
+      console.warn('SignOut error or timeout:', err);
     } finally {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setShadowUser(null);
-        setLoading(false);
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setShadowUser(null);
+      setLoading(false);
     }
   };
 

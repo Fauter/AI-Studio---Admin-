@@ -30,9 +30,9 @@ export const supabase = createClient(
   supabaseAnonKey,
   {
     auth: {
-      persistSession: false, // CRITICAL: Do not touch browser storage
-      autoRefreshToken: false, // CRITICAL: Do not set timers that try to write storage
-      detectSessionInUrl: false // CRITICAL: Do not read window.location
+      persistSession: true, // Enable session storage to prevent loss of session on tab suspension
+      autoRefreshToken: true, // Keep the session alive proactively
+      detectSessionInUrl: false
     }
   }
 );
