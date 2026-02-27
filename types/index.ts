@@ -90,11 +90,11 @@ export interface VehicleType {
   id: string;
   garage_id: string;
   name: string;
-  icon_key: VehicleIconKey | string; 
+  icon_key: VehicleIconKey | string;
   sort_order: number;
 }
 
-export type TariffType = 'hora' | 'turno' | 'abono'; 
+export type TariffType = 'hora' | 'turno' | 'abono';
 
 export interface Tariff {
   id: string;
@@ -104,13 +104,13 @@ export interface Tariff {
   days: number;
   hours: number;
   minutes: number;
-  tolerance: number; 
+  tolerance: number;
   sort_order: number;
-  is_protected: boolean; 
+  is_protected: boolean;
 }
 
 export interface Price {
-  id?: string; 
+  id?: string;
   garage_id: string;
   vehicle_type_id: string;
   tariff_id: string;
@@ -143,11 +143,26 @@ export interface MonthlyPunitorio {
   steps: MonthlyPunitorioStep[];
 }
 
+export interface SurchargeStep {
+  day: number;
+  percentage: number;
+}
+
+export interface SurchargeRule {
+  steps: SurchargeStep[];
+}
+
+export interface SurchargeConfig {
+  global_default: SurchargeRule;
+  monthly_overrides: Record<string, SurchargeRule>; // Keys are month indexes '0' to '11'
+}
+
 export interface FinancialConfig {
   garage_id: string;
-  punitorio_rules: MonthlyPunitorio[] | null; 
-  payment_methods: any | null; 
-  invoice_types: any | null; 
+  punitorio_rules: MonthlyPunitorio[] | null;
+  surcharge_config?: SurchargeConfig | null;
+  payment_methods: any | null;
+  invoice_types: any | null;
 }
 
 /**
@@ -168,7 +183,7 @@ export interface UserSession {
   email: string | null;
   full_name: string;
   role: UserRole;
-  isShadow?: boolean; 
+  isShadow?: boolean;
   owner_id?: string; // Reference to the Organization Owner (Boss)
   username?: string;
   permissions?: EmployeePermissions; // Added for Shadow Security logic

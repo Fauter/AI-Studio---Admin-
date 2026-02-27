@@ -51,6 +51,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   const profileRef = useRef<Profile | null>(null);
+  const isInitializedRef = useRef(false);
+
   useEffect(() => {
     profileRef.current = profile;
   }, [profile]);
@@ -60,7 +62,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const initAuth = async () => {
       try {
-        setLoading(true);
+        // Only show the global loader on TRUE cold boot, never on tab re-focus
+        if (!isInitializedRef.current) setLoading(true);
 
         // 1. Check Standard Session (Supabase Auth)
         const { data: { session: sbSession }, error: sbError } = await supabase.auth.getSession();
@@ -116,30 +119,63 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setProfile(null);
         }
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          isInitializedRef.current = true;
+        }
       }
     };
 
     initAuth();
 
     // Listener for Standard Auth Changes
+    // CRITICAL: After initialization, ALL events are handled SILENTLY (no loading state)
+    // to prevent the re-hydration loop on tab visibility change.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
 
+      // --- SIGN OUT: Always reset everything ---
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
         setProfile(null);
         setShadowUser(null);
+        isInitializedRef.current = false; // Allow cold-boot loader on next login
         setLoading(false);
-      } else if (event === 'SIGNED_IN' && newSession) {
-        const hasProfile = !!profileRef.current;
+        return;
+      }
 
-        if (!hasProfile) {
-          setLoading(true);
+      // --- TOKEN_REFRESHED: Silent in-place update (tab re-focus, background refresh) ---
+      if (event === 'TOKEN_REFRESHED' && newSession) {
+        setSession(newSession);
+        setUser(newSession.user);
+        // Profile stays as-is — no need to refetch on token refresh
+        return;
+      }
+
+      // --- SIGNED_IN ---
+      if (event === 'SIGNED_IN' && newSession) {
+        // If already initialized, this is a re-auth from tab wake-up → silent update
+        if (isInitializedRef.current) {
+          setSession(newSession);
+          setUser(newSession.user);
+          setProfile(prev => prev || {
+            id: newSession.user.id,
+            email: newSession.user.email || null,
+            full_name: newSession.user.user_metadata?.full_name || 'Usuario',
+            role: (newSession.user.user_metadata?.role as UserRole) || UserRole.OWNER
+          });
+          // Silent background profile refresh (no loading)
+          _fetchDbProfile(newSession.user.id, newSession.user)
+            .then(userProfile => { if (mounted) setProfile(userProfile); })
+            .catch(e => console.warn('[Auth] Async DB Profile Fetch Error:', e));
+          return;
         }
 
-        // Optimistic profile First
+        // TRUE first sign-in (cold boot): show loader briefly
+        setLoading(true);
+
+        // Optimistic profile first
         setProfile(prev => prev || {
           id: newSession.user.id,
           email: newSession.user.email || null,
@@ -152,16 +188,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setShadowUser(null);
         sessionStorage.removeItem('garage_shadow_user');
 
-        if (!hasProfile) {
-          setLoading(false);
-        }
+        setLoading(false);
+        isInitializedRef.current = true;
 
         _fetchDbProfile(newSession.user.id, newSession.user)
-          .then(userProfile => {
-            if (mounted) setProfile(userProfile);
-          })
+          .then(userProfile => { if (mounted) setProfile(userProfile); })
           .catch(e => console.warn('[Auth] Async DB Profile Fetch Error:', e));
-      } else if (newSession) {
+        return;
+      }
+
+      // --- FALLBACK: Any other event with a session (INITIAL_SESSION, USER_UPDATED, etc.) ---
+      if (newSession) {
         setSession(newSession);
         setUser(newSession.user);
         setProfile(prev => prev || {

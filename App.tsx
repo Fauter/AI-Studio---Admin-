@@ -38,21 +38,29 @@ const RootDispatcher = () => {
 
 // --- Main App Logic ---
 
+// Module-level flag to persist redirect state across MemoryRouter unmount/remount cycles
+let _hasRedirectedGlobal = false;
+
 const AppRoutes = () => {
   const { session, shadowUser, user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const [showReset, setShowReset] = useState(false);
 
   // REF: Controla que la redirección forzada ocurra SOLO UNA VEZ por sesión activa.
-  // Esto permite navegar dentro de la app sin ser pateado al inicio constantemente,
-  // pero asegura que un F5 o Login inicial respete la regla de entrada.
-  const hasRedirectedRef = useRef(false);
+  // Module-level backing ensures this survives MemoryRouter unmount/remount cycles.
+  const hasRedirectedRef = useRef(_hasRedirectedGlobal);
+
+  // Sync module-level flag on unmount so it persists across re-mounts
+  useEffect(() => {
+    return () => { _hasRedirectedGlobal = hasRedirectedRef.current; };
+  }, []);
 
   // --- GUARDIÁN GLOBAL DE NAVEGACIÓN ---
   useEffect(() => {
     // 1. Si no hay sesión, resetear el flag para permitir futura redirección al loguearse.
     if (!loading && !user && !shadowUser) {
       hasRedirectedRef.current = false;
+      _hasRedirectedGlobal = false; // Also reset module-level
       return;
     }
 
@@ -94,6 +102,7 @@ const AppRoutes = () => {
 
     // Marcar como redirigido para liberar la navegación interna
     hasRedirectedRef.current = true;
+    _hasRedirectedGlobal = true; // Persist across potential remounts
 
   }, [loading, user, shadowUser, profile, navigate]);
 
@@ -125,9 +134,10 @@ const AppRoutes = () => {
     window.location.replace('/');
   };
 
-  // 1. GLOBAL LOADING (Initial Check)
-  // Only show loader if we have NO previous session data while loading
-  if (loading && !session && !shadowUser) {
+  // 1. GLOBAL LOADING (Cold Boot Only)
+  // Only show loader if we have NO previous session data at all while loading.
+  // If user/session already exists in memory, let the dashboard stay visible.
+  if (loading && !session && !shadowUser && !user) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-50 relative overflow-hidden">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
