@@ -12,17 +12,15 @@ import PriceManagement from './pages/PriceManagement';
 import GlobalAdminPage from './pages/GlobalAdmin';
 import SettingsPage from './pages/SettingsPage';
 import AccessControlPage from './pages/AccessControlPage';
+import CustomersPage from './pages/CustomersPage';
+import CashClosuresPage from './pages/CashClosuresPage';
+import IncidentsPage from './pages/IncidentsPage';
 import ConfigAdmin from './components/admin/ConfigAdmin';
 import { UserRole } from './types';
 
 // --- Components ---
 
-const DashboardHome = () => (
-  <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm animate-in fade-in">
-    <h2 className="text-xl font-bold text-slate-900">Resumen Operativo</h2>
-    <p className="text-slate-500 mt-2">Bienvenido al panel de control. Selecciona una opción del menú lateral para comenzar.</p>
-  </div>
-);
+import DashboardHome from './pages/DashboardHome';
 
 // Componente visual simple para la raíz. La lógica real está en el Guardián de AppRoutes.
 const RootDispatcher = () => {
@@ -182,9 +180,12 @@ const AppRoutes = () => {
       <Route path="/:garageId" element={<DashboardLayout />}>
         <Route index element={<DashboardHome />} />
         <Route path="dashboard" element={<DashboardHome />} />
+        <Route path="abonos" element={<CustomersPage />} />
         <Route path="finanzas" element={<PenaltyConfigPage />} />
         <Route path="precios" element={<PriceManagement />} />
         <Route path="accesos" element={<AccessControlPage />} />
+        <Route path="cierres" element={<CashClosuresPage />} />
+        <Route path="incidentes" element={<IncidentsPage />} />
         <Route path="ajustes" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>

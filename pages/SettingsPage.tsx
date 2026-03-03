@@ -14,7 +14,12 @@ import {
   Copy,
   Check,
   Fingerprint,
-  Database
+  Database,
+  Users,
+  Search,
+  UserPlus,
+  Phone,
+  Mail
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BuildingConfigPage from './BuildingConfig';
@@ -272,6 +277,170 @@ const GeneralSettingsTab = () => {
   );
 };
 
+// --- Sub-Component: Data Loading & Customer Master-Detail ---
+const DataLoadingTab = () => {
+  const { garageId } = useParams<{ garageId: string }>();
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'list' | 'form'>('list');
+
+  const fetchCustomers = async () => {
+    if (!garageId) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('garage_id', garageId)
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        setCustomers(data);
+      }
+    } catch (err) {
+      console.error("Error fetching customers:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [garageId]);
+
+  const filteredCustomers = customers.filter(c =>
+    (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (c.dni || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (view === 'form') {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm animate-in fade-in zoom-in-95 w-full">
+        <FormularioMigracion
+          garageId={garageId || ''}
+          preloadedCustomer={selectedCustomer}
+          onSuccess={() => {
+            fetchCustomers();
+            setSelectedCustomer(null);
+            setView('list');
+          }}
+          onBack={() => {
+            setSelectedCustomer(null);
+            setView('list');
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden min-h-[600px] shadow-sm animate-in fade-in w-full flex flex-col">
+      {/* Header Vista de Lista */}
+      <div className="p-6 md:p-8 border-b border-slate-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h3 className="font-black text-slate-800 text-lg flex items-center gap-3">
+            <Users className="h-6 w-6 text-indigo-500" /> Directorio Maestro de Clientes
+          </h3>
+          <p className="text-sm text-slate-500 mt-1">Seleccione un cliente para gestionar sus cocheras o registre uno nuevo.</p>
+        </div>
+
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <div className="relative flex-1 md:w-80">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              placeholder="Buscar por nombre o DNI..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-4 py-3 text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm"
+            />
+          </div>
+          <button
+            onClick={() => {
+              setSelectedCustomer(null);
+              setView('form');
+            }}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg hover:shadow-xl transition-all active:scale-95 whitespace-nowrap"
+          >
+            <UserPlus className="h-4 w-4" /> Nuevo Cliente
+          </button>
+        </div>
+      </div>
+
+      {/* Contenido Vista de Lista */}
+      <div className="flex-1 overflow-y-auto w-full">
+        {loading ? (
+          <div className="p-20 text-center text-slate-400 flex flex-col items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin mb-4 text-indigo-400" />
+            <span className="text-sm font-medium">Cargando directorio...</span>
+          </div>
+        ) : filteredCustomers.length > 0 ? (
+          <div className="bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-y border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                    <th className="py-3 px-6 font-bold w-[35%]">Propietario / Cliente</th>
+                    <th className="py-3 px-6 font-bold w-[25%]">DNI / CUIT</th>
+                    <th className="py-3 px-6 font-bold w-[25%]">Contacto</th>
+                    <th className="py-3 px-6 font-bold text-right w-[15%]">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredCustomers.map(c => (
+                    <tr
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedCustomer(c);
+                        setView('form');
+                      }}
+                      className="group hover:bg-slate-50/80 transition-colors cursor-pointer"
+                    >
+                      <td className="py-3 px-6">
+                        <span className="font-bold text-slate-800 text-sm group-hover:text-indigo-700 transition-colors block">{c.name}</span>
+                      </td>
+                      <td className="py-3 px-6">
+                        <span className="text-xs text-slate-500 font-mono bg-white px-2 py-0.5 rounded border border-slate-200 shadow-sm">{c.dni}</span>
+                      </td>
+                      <td className="py-3 px-6">
+                        <div className="flex flex-col gap-1 justify-center">
+                          {c.email ? (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1.5"><Mail className="w-3 h-3 text-slate-400" /> <span className="truncate max-w-[150px]">{c.email}</span></div>
+                          ) : (
+                            <div className="text-[11px] text-slate-400 opacity-60 flex items-center gap-1.5"><Mail className="w-3 h-3" /> <em>Sin email</em></div>
+                          )}
+                          {c.phone ? (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1.5"><Phone className="w-3 h-3 text-slate-400" /> <span>{c.phone}</span></div>
+                          ) : (
+                            <div className="text-[11px] text-slate-400 opacity-60 flex items-center gap-1.5"><Phone className="w-3 h-3" /> <em>Sin teléfono</em></div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-6 text-right">
+                        <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider bg-indigo-50 px-3 py-1 pb-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-sm">
+                          Seleccionar &rarr;
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="p-20 text-center text-slate-400 flex flex-col items-center justify-center">
+            <div className="bg-slate-100 p-4 rounded-full mb-4">
+              <Search className="h-8 w-8 text-slate-300" />
+            </div>
+            <p className="text-base font-bold text-slate-600 mb-1">No se encontraron resultados</p>
+            <p className="text-sm">Intenta con otro término de búsqueda o registra un cliente nuevo.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- Main Page Component ---
 
 export default function SettingsPage() {
@@ -340,7 +509,7 @@ export default function SettingsPage() {
         {/* Data Loading Embedded */}
         {activeTab === 'data' && (
           <div className="animate-in fade-in slide-in-from-bottom-2">
-            <FormularioMigracion garageId={garageId || ''} />
+            <DataLoadingTab />
           </div>
         )}
       </div>

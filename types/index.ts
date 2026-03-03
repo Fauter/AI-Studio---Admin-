@@ -84,13 +84,14 @@ export interface BuildingLevel {
  * Price Matrix & Tariffs
  */
 
-export type VehicleIconKey = 'car' | 'bike' | 'truck' | 'bus';
+export type VehicleIconKey = 'car' | 'bike' | 'motorcycle' | 'van' | 'pickup' | 'truck' | 'bus' | 'trailer' | 'tractor' | 'machinery' | 'cargo' | 'emergency';
 
 export interface VehicleType {
   id: string;
   garage_id: string;
   name: string;
   icon_key: VehicleIconKey | string;
+  color_key?: string;
   sort_order: number;
 }
 
@@ -107,6 +108,7 @@ export interface Tariff {
   tolerance: number;
   sort_order: number;
   is_protected: boolean;
+  max_vehicles?: number;
 }
 
 export interface Price {
@@ -163,6 +165,8 @@ export interface FinancialConfig {
   surcharge_config?: SurchargeConfig | null;
   payment_methods: any | null;
   invoice_types: any | null;
+  initial_tolerance?: number | null;
+  fractionate_after?: number | null;
 }
 
 /**

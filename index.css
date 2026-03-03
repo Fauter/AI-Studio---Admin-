@@ -33,3 +33,10 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-slate-300 rounded-full hover:bg-slate-400;
 }
+
+/* Dashboard table thin scrollbar — invisible until hover */
+.scrollbar-thin::-webkit-scrollbar { width: 5px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
+.scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
+.scrollbar-thin:hover::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }

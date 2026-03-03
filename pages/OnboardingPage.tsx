@@ -16,7 +16,8 @@ import {
   Shield,
   Key,
   UserPlus,
-  Trash2,
+  Pencil,
+  X,
   Briefcase,
   Lock,
   Unlock,
@@ -189,15 +190,74 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
     }
   };
 
-  const handleDeleteUser = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este usuario?')) return;
+  // --- EDIT EMPLOYEE STATE & HANDLERS ---
+  const [editingEmp, setEditingEmp] = useState<EmployeeAccount | null>(null);
+  const [editForm, setEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    username: '',
+    password: '',
+    role: UserRole.OPERATOR
+  });
+  const [isEditingLoading, setIsEditingLoading] = useState(false);
+
+  const handleEditClick = (emp: EmployeeAccount) => {
+    setEditingEmp(emp);
+    setEditForm({
+      firstName: emp.first_name,
+      lastName: emp.last_name,
+      username: emp.username,
+      password: '',
+      role: emp.role
+    });
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEmp) return;
+
+    setIsEditingLoading(true);
+    setStatus(null);
+
     try {
-      const { error } = await supabase.from('employee_accounts').delete().eq('id', id);
-      if (error) throw error;
-      fetchStaff();
-      if (selectedEmp?.id === id) setSelectedEmp(null);
-    } catch (err) {
-      console.error(err);
+      if (editForm.username.length < 3) throw new Error("Usuario muy corto (min 3).");
+
+      if (isManager && editForm.role === UserRole.MANAGER) {
+        throw new Error("Privilegios insuficientes para asignar rol de Gerente.");
+      }
+
+      const payload: any = {
+        first_name: editForm.firstName.trim(),
+        last_name: editForm.lastName.trim(),
+        username: editForm.username.toLowerCase().trim(),
+        role: editForm.role,
+      };
+
+      if (editForm.password.trim().length > 0) {
+        if (editForm.password.length < 4) throw new Error("Contraseña muy corta (min 4).");
+        payload.password_hash = editForm.password;
+      }
+
+      const { error } = await supabase
+        .from('employee_accounts')
+        .update(payload)
+        .eq('id', editingEmp.id);
+
+      if (error) {
+        if (error.code === '23505') throw new Error("El usuario ya existe globalmente.");
+        throw error;
+      }
+
+      setStatus({ type: 'success', text: 'Empleado actualizado exitosamente.' });
+      setStaff(prev => prev.map(s => s.id === editingEmp.id ? { ...s, ...payload } : s));
+      setEditingEmp(null);
+      if (selectedEmp?.id === editingEmp.id) {
+        setSelectedEmp(prev => prev ? { ...prev, ...payload } : prev);
+      }
+    } catch (err: any) {
+      setStatus({ type: 'error', text: err.message });
+    } finally {
+      setIsEditingLoading(false);
     }
   };
 
@@ -326,7 +386,7 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                         <td className="px-6 py-4 font-mono text-slate-500">{s.username}</td>
                         <td className="px-6 py-4"><span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", roleConfig.style)}>{roleConfig.label}</span></td>
                         <td className="px-6 py-4 text-right">
-                          <button onClick={() => handleDeleteUser(s.id)} className="text-slate-300 hover:text-red-600 p-2"><Trash2 className="h-4 w-4" /></button>
+                          <button onClick={() => handleEditClick(s)} className="text-slate-400 hover:text-indigo-600 p-2 transition-colors" title="Editar empleado"><Pencil className="h-4 w-4" /></button>
                         </td>
                       </tr>
                     )
@@ -436,6 +496,50 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                 <p className="text-sm">Configura sus accesos a garajes y permisos.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingEmp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Pencil className="h-5 w-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-800">Editar Empleado</h3>
+              </div>
+              <button onClick={() => setEditingEmp(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateUser} className="p-6 space-y-5">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <input type="text" placeholder="Nombre" required value={editForm.firstName} onChange={e => setEditForm({ ...editForm, firstName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="text" placeholder="Apellido" required value={editForm.lastName} onChange={e => setEditForm({ ...editForm, lastName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="relative">
+                  <Key className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                  <input type="text" placeholder="usuario.sistema" required value={editForm.username} onChange={e => setEditForm({ ...editForm, username: e.target.value.replace(/\s/g, '').toLowerCase() })} className="w-full pl-9 px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <input type="text" placeholder="Nueva Contraseña (opcional)" value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500" />
+                <div className="relative">
+                  <Briefcase className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                  <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value as UserRole })} className="w-full pl-9 px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                    {!isManager && <option value={UserRole.MANAGER}>Gerente</option>}
+                    <option value={UserRole.ADMINISTRATIVE}>Administrativo</option>
+                    <option value={UserRole.OPERATOR}>Operador</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditingEmp(null)} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-3 rounded-xl text-sm transition-all">Cancelar</button>
+                <button type="submit" disabled={isEditingLoading} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl flex justify-center gap-2 text-sm transition-all shadow-md shadow-indigo-200">
+                  {isEditingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

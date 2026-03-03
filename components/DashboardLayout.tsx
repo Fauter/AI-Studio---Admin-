@@ -1,18 +1,21 @@
 
 import React, { useEffect, useState } from 'react';
 import { Outlet, useParams, useNavigate, NavLink, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Settings, 
-  CreditCard, 
-  ChevronDown, 
-  LogOut, 
+import {
+  LayoutDashboard,
+  Settings,
+  CreditCard,
+  ChevronDown,
+  LogOut,
   Menu,
   Car,
   TableProperties,
   Server,
   Lock,
-  LayoutGrid
+  LayoutGrid,
+  UserCheck,
+  Banknote,
+  ShieldAlert
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -23,7 +26,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut, user, profile, shadowUser, loading } = useAuth(); // Import loading!
-  
+
   const [garages, setGarages] = useState<Garage[]>([]);
   const [loadingGarages, setLoadingGarages] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -37,18 +40,18 @@ export default function DashboardLayout() {
     const secureFetch = async () => {
       // 1. Wait for Auth (prevent premature redirects)
       if (loading) return;
-      
+
       // 2. Validate Session
       if (!user && !shadowUser) {
         // App.tsx should have handled this, but double check
-        navigate('/'); 
+        navigate('/');
         return;
       }
 
       // 3. Block Restricted Roles (Desk App Users)
       if (isRestrictedRole) {
         setLoadingGarages(false);
-        return; 
+        return;
       }
 
       // 4. Protect Global Admin
@@ -62,35 +65,35 @@ export default function DashboardLayout() {
         let fetchedGarages: Garage[] = [];
 
         if (isSuperAdmin) {
-           // Admin sees all
-           if (!isGlobalAdminSection) {
-             const { data } = await supabase.from('garages').select('*');
-             fetchedGarages = data as Garage[] || [];
-           }
+          // Admin sees all
+          if (!isGlobalAdminSection) {
+            const { data } = await supabase.from('garages').select('*');
+            fetchedGarages = data as Garage[] || [];
+          }
         } else if (profile?.role === UserRole.OWNER) {
-           const { data } = await supabase.from('garages').select('*').eq('owner_id', user!.id);
-           fetchedGarages = data as Garage[] || [];
+          const { data } = await supabase.from('garages').select('*').eq('owner_id', user!.id);
+          fetchedGarages = data as Garage[] || [];
         } else if (shadowUser) {
-           // --- SHADOW SECURITY ---
-           // Filter by permissions JSONB
-           const allowedIds = shadowUser.permissions?.allowed_garages || [];
-           
-           if (allowedIds.length > 0) {
-             const { data } = await supabase.from('garages').select('*').in('id', allowedIds);
-             fetchedGarages = data as Garage[] || [];
-           }
-           
-           // Context Guard: If trying to access a garage not in permissions
-           if (garageId && !allowedIds.includes(garageId)) {
-              console.warn(`[Security] Shadow User tried accessing forbidden garage: ${garageId}`);
-              // Si es administrativo, mandarlo a su único garaje permitido, sino al onboarding
-              if (shadowUser.role === UserRole.ADMINISTRATIVE && allowedIds.length > 0) {
-                 navigate(`/${allowedIds[0]}/dashboard`, { replace: true });
-              } else {
-                 navigate('/setup/onboarding', { replace: true });
-              }
-              return;
-           }
+          // --- SHADOW SECURITY ---
+          // Filter by permissions JSONB
+          const allowedIds = shadowUser.permissions?.allowed_garages || [];
+
+          if (allowedIds.length > 0) {
+            const { data } = await supabase.from('garages').select('*').in('id', allowedIds);
+            fetchedGarages = data as Garage[] || [];
+          }
+
+          // Context Guard: If trying to access a garage not in permissions
+          if (garageId && !allowedIds.includes(garageId)) {
+            console.warn(`[Security] Shadow User tried accessing forbidden garage: ${garageId}`);
+            // Si es administrativo, mandarlo a su único garaje permitido, sino al onboarding
+            if (shadowUser.role === UserRole.ADMINISTRATIVE && allowedIds.length > 0) {
+              navigate(`/${allowedIds[0]}/dashboard`, { replace: true });
+            } else {
+              navigate('/setup/onboarding', { replace: true });
+            }
+            return;
+          }
         }
 
         setGarages(fetchedGarages);
@@ -99,13 +102,13 @@ export default function DashboardLayout() {
         if (garageId && !isGlobalAdminSection) {
           const isValid = fetchedGarages.find(g => g.id === garageId);
           if (!isValid) {
-             console.warn(`[Security] Access Denied to Garage ${garageId}`);
-             // Si el garaje no pertenece al usuario, lo devolvemos a zona segura
-             if (shadowUser?.role === UserRole.ADMINISTRATIVE && shadowUser.permissions?.allowed_garages.length === 1) {
-                navigate(`/${shadowUser.permissions.allowed_garages[0]}/dashboard`, { replace: true });
-             } else {
-                navigate('/setup/onboarding', { replace: true });
-             }
+            console.warn(`[Security] Access Denied to Garage ${garageId}`);
+            // Si el garaje no pertenece al usuario, lo devolvemos a zona segura
+            if (shadowUser?.role === UserRole.ADMINISTRATIVE && shadowUser.permissions?.allowed_garages.length === 1) {
+              navigate(`/${shadowUser.permissions.allowed_garages[0]}/dashboard`, { replace: true });
+            } else {
+              navigate('/setup/onboarding', { replace: true });
+            }
           }
         }
 
@@ -130,8 +133,11 @@ export default function DashboardLayout() {
   // --- MENU FILTERING (REGLAS DE NEGOCIO STRICTAS) ---
   const allNavLinks = [
     { id: 'dashboard', name: 'Dashboard', path: 'dashboard', icon: LayoutDashboard },
+    { id: 'abonos', name: 'Abonos', path: 'abonos', icon: UserCheck },
     { id: 'precios', name: 'Gestión de Precios', path: 'precios', icon: TableProperties },
     { id: 'finanzas', name: 'Finanzas & Punitorios', path: 'finanzas', icon: CreditCard },
+    { id: 'cierres', name: 'Cierres de Caja', path: 'cierres', icon: Banknote },
+    { id: 'incidentes', name: 'Incidentes', path: 'incidentes', icon: ShieldAlert },
     { id: 'ajustes', name: 'Configuración', path: 'ajustes', icon: Settings },
   ];
 
@@ -169,7 +175,7 @@ export default function DashboardLayout() {
           <p className="text-slate-500 mb-8">
             Tu perfil solo tiene acceso a través de la aplicación de escritorio.
           </p>
-          <button 
+          <button
             onClick={() => signOut()}
             className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
           >
@@ -184,7 +190,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      
+
       {/* Sidebar */}
       <aside className={`
         fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 transition-transform duration-300 ease-in-out
@@ -207,13 +213,13 @@ export default function DashboardLayout() {
           <div className="relative">
             {/* Si es administrativo, no puede cambiar de garaje (solo tiene 1) */}
             {shadowUser?.role === UserRole.ADMINISTRATIVE ? (
-               <div className="w-full rounded-lg bg-slate-800 border border-slate-700 py-2.5 px-3 text-sm font-medium text-white flex items-center gap-2">
-                 <Lock className="h-3 w-3 text-slate-500" />
-                 <span className="truncate">{currentGarage?.name || 'Cargando...'}</span>
-               </div>
+              <div className="w-full rounded-lg bg-slate-800 border border-slate-700 py-2.5 px-3 text-sm font-medium text-white flex items-center gap-2">
+                <Lock className="h-3 w-3 text-slate-500" />
+                <span className="truncate">{currentGarage?.name || 'Cargando...'}</span>
+              </div>
             ) : (
               <div className="relative">
-                <select 
+                <select
                   className={`w-full appearance-none rounded-lg bg-slate-800 border border-slate-700 py-2.5 pl-3 pr-10 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all
                     ${isGlobalAdminSection ? 'opacity-50 cursor-not-allowed' : ''}
                   `}
@@ -263,9 +269,9 @@ export default function DashboardLayout() {
           )}
 
           {/* Operational Links */}
-          {(garageId || (!isSuperAdmin && garages.length > 0)) && (
-             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-2">Gestión Operativa</p>
-          )}
+          {/* {(garageId || (!isSuperAdmin && garages.length > 0)) && (
+            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-2">Gestión Operativa</p>
+          )} */}
 
           {garageId ? (
             allowedNavLinks.map((item) => (
