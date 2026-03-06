@@ -35,7 +35,12 @@ interface Debt {
     status: string;
     due_date: string | null;
     type?: string;
+    remaining_amount?: number;
+    amount_paid?: number;
+    subscription_id?: string;
 }
+
+const getRemaining = (d: Debt) => (d.remaining_amount != null) ? Number(d.remaining_amount) : Number(d.amount);
 
 interface Cochera {
     id: string;
@@ -145,7 +150,7 @@ export default function CustomersPage() {
     const customersWithStats = useMemo(() => {
         return filteredCustomers.map(customer => {
             const customerDebts = debts.filter(d => d.customer_id === customer.id && d.status === 'PENDING');
-            const totalDebt = customerDebts.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+            const totalDebt = customerDebts.reduce((sum, d) => sum + getRemaining(d), 0);
             const customerCocheras = cocheras.filter(c => c.cliente_id === customer.id);
 
             return {
@@ -159,41 +164,67 @@ export default function CustomersPage() {
 
     // Data for the Selected Customer Detail View
     const selectedDebts = selectedCustomer ? debts.filter(d => d.customer_id === selectedCustomer.id) : [];
-    const selectedTotalDebt = selectedDebts.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+    const selectedTotalDebt = selectedDebts.reduce((sum, d) => sum + getRemaining(d), 0);
 
-    // Realizar el cruce de datos: cochera -> vehículo -> suscripción
+    // Realizar el cruce de datos: cochera -> vehículo -> suscripción -> deudas CANON
     const selectedCocheras = useMemo(() => {
         if (!selectedCustomer) return [];
         const customerCocheras = cocheras.filter(c => c.cliente_id === selectedCustomer.id);
-        const customerSubs = subscriptions.filter(s => s.customer_id === selectedCustomer.id && s.active);
-        const now = new Date(2026, 2, 3); // 03 de Marzo de 2026
+        const customerSubs = subscriptions.filter(s => s.customer_id === selectedCustomer.id);
+
+        const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
         return customerCocheras.map(cochera => {
             const allVehicles = vehicles.filter(v => cochera.vehiculos?.includes(v.plate));
 
-            let isVencida = false;
-            let currentEndDate = null;
+            let hasCanonDebt = false;
+            let currentEndDate: string | null = null;
+            let totalCocheraDebt = 0;
+            const owedMonths: string[] = [];
+            const cocheraDebtIds: string[] = [];
 
+            // Iterate ALL vehicles and ALL subs (not just active — inactive subs can still have pending debts)
             for (const vehicle of allVehicles) {
-                const subForVehicle = customerSubs.find(s => s.vehicle_id === vehicle.id);
-                if (subForVehicle && subForVehicle.end_date) {
-                    currentEndDate = subForVehicle.end_date;
-
-                    const [year, month, day] = subForVehicle.end_date.split('T')[0].split('-');
-                    const endDateObj = new Date(Number(year), Number(month) - 1, Number(day));
-
-                    if (endDateObj < now) {
-                        isVencida = true;
-                    } else {
-                        isVencida = false;
+                const subsForVehicle = customerSubs.filter(s => s.vehicle_id === vehicle.id);
+                for (const sub of subsForVehicle) {
+                    // Track end_date from the most recent sub (any state) for calendar check
+                    if (sub.end_date) {
+                        if (!currentEndDate || new Date(sub.end_date).getTime() > new Date(currentEndDate).getTime()) {
+                            currentEndDate = sub.end_date;
+                        }
                     }
-                    break;
+
+                    // Find CANON debts tied to this subscription
+                    const subDebts = selectedDebts.filter(d =>
+                        d.subscription_id === sub.id &&
+                        d.status === 'PENDING' &&
+                        d.type === 'CANON' &&
+                        getRemaining(d) > 0
+                    );
+
+                    if (subDebts.length > 0) {
+                        hasCanonDebt = true;
+                        for (const debt of subDebts) {
+                            totalCocheraDebt += getRemaining(debt);
+                            cocheraDebtIds.push(debt.id);
+                            if (debt.due_date) {
+                                const [y, m] = debt.due_date.split('T')[0].split('-');
+                                owedMonths.push(`${monthNames[parseInt(m, 10) - 1]} ${y}`);
+                            }
+                        }
+                    }
                 }
             }
 
-            return { ...cochera, allVehicles, isVencida, currentEndDate };
+            // Doble Candado: Calendar expired OR has pending CANON debts
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const calendarExpired = currentEndDate ? new Date(currentEndDate).getTime() < today.getTime() : false;
+            const isVencida = calendarExpired || hasCanonDebt;
+
+            return { ...cochera, allVehicles, isVencida, currentEndDate, totalCocheraDebt, owedMonths, cocheraDebtIds, calendarExpired };
         });
-    }, [selectedCustomer, cocheras, vehicles, subscriptions]);
+    }, [selectedCustomer, cocheras, vehicles, subscriptions, selectedDebts]);
 
     const selectedSubs = selectedCustomer ? subscriptions.filter(s => s.customer_id === selectedCustomer.id).sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime()) : [];
 
@@ -562,42 +593,59 @@ export default function CustomersPage() {
                                                 {selectedDebts.map(debt => {
                                                     const isCanon = debt.type === 'CANON';
                                                     const isMigration = debt.type === 'MANUAL_MIGRATION';
-                                                    const label = isCanon ? 'Cochera Vencida' : isMigration ? 'Deuda Manual' : 'Abono Impago';
+
+                                                    let label = isMigration ? 'Deuda Manual' : 'Abono Impago';
+                                                    if (isCanon) {
+                                                        const relatedSub = selectedSubs.find(s => s.id === debt.subscription_id);
+                                                        if (relatedSub) {
+                                                            const relatedCochera = selectedCocheras.find(c =>
+                                                                c.allVehicles?.some((v: any) => v.id === relatedSub.vehicle_id)
+                                                            );
+                                                            if (relatedCochera) {
+                                                                const dateStr = debt.due_date ? (() => {
+                                                                    const [y, m] = debt.due_date.split('T')[0].split('-');
+                                                                    return `${m}/${y}`;
+                                                                })() : '';
+                                                                label = `Cochera #${relatedCochera.numero || relatedCochera.name || 'S/N'}${dateStr ? ` - ${dateStr}` : ''}`;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    const remaining = getRemaining(debt);
+                                                    const isPartial = debt.amount_paid != null && Number(debt.amount_paid) > 0;
+
+                                                    // Determine color scheme: amber for partial, red for full debt
+                                                    const colorScheme = isPartial
+                                                        ? { icon: 'bg-amber-50 border-amber-200 text-amber-600', label: 'text-amber-900', amount: 'text-amber-600', badge: 'text-amber-600 bg-amber-50 border-amber-200' }
+                                                        : isMigration
+                                                            ? { icon: 'bg-orange-50 border-orange-100 text-orange-600', label: 'text-orange-900', amount: 'text-orange-600', badge: 'text-orange-500 bg-orange-50 border-orange-200' }
+                                                            : { icon: 'bg-red-50 border-red-100 text-red-600', label: 'text-red-900', amount: 'text-red-600', badge: 'text-red-500 bg-red-50 border-red-200' };
 
                                                     return (
                                                         <li key={debt.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50">
                                                             <div className="flex items-center gap-4">
-                                                                <div className={cn(
-                                                                    "h-10 w-10 border text-lg rounded-lg flex items-center justify-center font-bold",
-                                                                    isCanon ? "bg-red-50 border-red-100 text-red-600" :
-                                                                        isMigration ? "bg-orange-50 border-orange-100 text-orange-600" :
-                                                                            "bg-red-50 border-red-100 text-red-600"
-                                                                )}>
+                                                                <div className={cn("h-10 w-10 border text-lg rounded-lg flex items-center justify-center font-bold", colorScheme.icon)}>
                                                                     $
                                                                 </div>
                                                                 <div>
-                                                                    <p className={cn(
-                                                                        "font-bold",
-                                                                        isCanon ? "text-red-900" :
-                                                                            isMigration ? "text-orange-900" :
-                                                                                "text-slate-800"
-                                                                    )}>{label}</p>
+                                                                    <p className={cn("font-bold flex items-center gap-2 flex-wrap", colorScheme.label)}>
+                                                                        {label}
+                                                                        {isPartial && <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">Saldo Parcial</span>}
+                                                                    </p>
                                                                     <p className="text-xs text-slate-500 mt-0.5">Vencimiento: {debt.due_date ? new Date(debt.due_date).toLocaleDateString() : 'Desconocido'}</p>
+                                                                    {isPartial && (
+                                                                        <p className="text-[11px] text-slate-400 mt-1">
+                                                                            Original: <span className="font-semibold">${Number(debt.amount).toLocaleString()}</span> | Pagado: <span className="font-semibold text-emerald-600">${Number(debt.amount_paid).toLocaleString()}</span> | Restante: <span className="font-semibold text-amber-600">${remaining.toLocaleString()}</span>
+                                                                        </p>
+                                                                    )}
                                                                 </div>
                                                             </div>
-                                                            <div className="text-right">
-                                                                <p className={cn(
-                                                                    "font-bold text-lg",
-                                                                    isCanon ? "text-red-600" :
-                                                                        isMigration ? "text-orange-600" :
-                                                                            "text-red-600"
-                                                                )}>${Number(debt.amount).toLocaleString()}</p>
+                                                            <div className="text-right flex flex-col items-end">
+                                                                <p className={cn("font-bold text-lg", colorScheme.amount)}>${remaining.toLocaleString()}</p>
                                                                 <span className={cn(
-                                                                    "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
-                                                                    isCanon ? "text-red-500 bg-red-50 border-red-200" :
-                                                                        isMigration ? "text-orange-500 bg-orange-50 border-orange-200" :
-                                                                            "text-red-400 bg-red-50 border-red-100"
-                                                                )}>Pendiente</span>
+                                                                    "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border mt-0.5",
+                                                                    colorScheme.badge
+                                                                )}>{isPartial ? 'Saldo Parcial' : 'Pendiente'}</span>
                                                             </div>
                                                         </li>
                                                     );
@@ -634,13 +682,25 @@ export default function CustomersPage() {
                                                                 <Building2 className="h-5 w-5" />
                                                             </div>
                                                             <div className="flex flex-col">
-                                                                <p className={cn("font-black text-lg flex items-center gap-2", cochera.isVencida ? "text-red-700" : "text-slate-800")}>
+                                                                {/* <p className={cn("font-black text-lg flex items-center gap-2 flex-wrap", cochera.isVencida ? "text-red-700" : "text-slate-800")}>
                                                                     {cochera.numero || cochera.name || 'S/N'}
-                                                                    {cochera.isVencida && (
+                                                                    {cochera.isVencida ? (
                                                                         <span className="text-[10px] font-bold uppercase tracking-wider text-red-500 bg-red-100 px-1.5 py-0.5 rounded">Vencida</span>
+                                                                    ) : (
+                                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Vigente</span>
                                                                     )}
                                                                 </p>
-                                                                <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit">
+                                                                {cochera.totalCocheraDebt > 0 && (
+                                                                    <span className="text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded w-fit mt-1">
+                                                                        Saldo Pendiente: ${cochera.totalCocheraDebt.toLocaleString()}
+                                                                    </span>
+                                                                )}
+                                                                {cochera.owedMonths && cochera.owedMonths.length > 0 && (
+                                                                    <span className="text-[10px] font-medium text-red-500 mt-0.5">
+                                                                        Debe {cochera.owedMonths.length} mes(es): {cochera.owedMonths.join(', ')}
+                                                                    </span>
+                                                                )} */}
+                                                                <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit mt-1">
                                                                     Tipo: {cochera.tipo || 'Standard'}
                                                                 </span>
                                                             </div>
@@ -712,16 +772,16 @@ export default function CustomersPage() {
                                                             </div>
                                                         )}
 
-                                                        {(cochera as any).currentEndDate && (
+                                                        {cochera.currentEndDate && (
                                                             <div className={cn(
                                                                 "mt-4 pt-3 border-t border-slate-100 text-xs",
                                                                 cochera.isVencida ? "text-red-600 font-bold" : "text-indigo-600 font-medium"
                                                             )}>
-                                                                Vencimiento: {(() => {
-                                                                    const [year, month, day] = (cochera as any).currentEndDate.split('T')[0].split('-');
+                                                                Vencimiento Suscripción: {(() => {
+                                                                    const [year, month, day] = cochera.currentEndDate!.split('T')[0].split('-');
                                                                     return `${day}/${month}/${year}`;
                                                                 })()}
-                                                                {cochera.isVencida && " (VENCIDA)"}
+                                                                {cochera.calendarExpired && " (VENCIDA)"}
                                                             </div>
                                                         )}
                                                     </div>

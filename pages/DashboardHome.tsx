@@ -28,6 +28,9 @@ interface Movement {
     timestamp: string;
     operator?: string;
     operator_name?: string;
+    ticket_code?: string;
+    invoice_type?: string;
+    notes?: string;
 }
 
 interface Stay {
@@ -61,7 +64,15 @@ const EMPTY_STAY_FILTERS: StayFilters = { plate: '', vehicleType: '', timeRange:
 
 // ─── Helpers ───────────────────────────────────────────────────────
 const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(amount);
+    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(amount);
+
+const formatNotesCurrency = (text?: string) => {
+    if (!text) return '---';
+    return text.replace(/\$(\d+)/g, (match, p1) => {
+        const num = parseInt(p1, 10);
+        return isNaN(num) ? match : `$${new Intl.NumberFormat('es-AR').format(num)}`;
+    });
+};
 
 const getTimeElapsed = (entryTime: string) => {
     const diffMs = Date.now() - new Date(entryTime).getTime();
@@ -107,7 +118,7 @@ function FilterSelect({ value, onChange, options, placeholder }: {
             <select
                 value={value}
                 onChange={e => onChange(e.target.value)}
-                className="w-full appearance-none text-xs bg-white border border-slate-200 rounded-md pl-2 pr-6 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer truncate"
+                className="w-full h-9 appearance-none text-xs bg-white border border-slate-200 rounded-md pl-2 pr-6 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer truncate"
             >
                 <option value="">{placeholder}</option>
                 {options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -315,7 +326,7 @@ export default function DashboardHome() {
     // RENDER
     // ═════════════════════════════════════════════════════════════════
     return (
-        <div className="px-3 py-2 space-y-2 max-w-[1600px] mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
+        <div className="px-1 py-2 space-y-2 max-w-[1600px] mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
 
             {/* ── Header compacto ── */}
             <div className="flex items-center justify-between gap-4">
@@ -375,6 +386,120 @@ export default function DashboardHome() {
                     </button>
                 </div>
 
+                {/* Movements Filter Toolbar */}
+                {activeTab === 'movements' && (
+                    <div className="bg-slate-50/50 p-3 border-b border-slate-200 shrink-0">
+                        <div className="flex flex-wrap gap-4 items-end">
+                            {/* Group 1: Búsqueda */}
+                            <div className="flex gap-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Fecha</label>
+                                    <input
+                                        type="date"
+                                        value={movFilters.date}
+                                        onChange={e => updateMovFilter('date', e.target.value)}
+                                        className="w-36 h-9 text-xs bg-white border border-slate-200 rounded-md px-2 text-slate-700 cursor-pointer focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Patente</label>
+                                    <div className="relative w-36">
+                                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            value={movFilters.plate}
+                                            onChange={e => updateMovFilter('plate', e.target.value)}
+                                            placeholder="Buscar…"
+                                            className="w-full h-9 text-xs bg-white border border-slate-200 rounded-md pl-8 pr-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Group 2: Categorías */}
+                            <div className="flex gap-2">
+                                <div className="w-32">
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Operador</label>
+                                    <FilterSelect
+                                        value={movFilters.operator}
+                                        onChange={v => updateMovFilter('operator', v)}
+                                        options={operatorOptions}
+                                        placeholder="Todos"
+                                    />
+                                </div>
+                                <div className="w-32">
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Método</label>
+                                    <FilterSelect
+                                        value={movFilters.method}
+                                        onChange={v => updateMovFilter('method', v)}
+                                        options={methodOptions}
+                                        placeholder="Todos"
+                                    />
+                                </div>
+                                <div className="w-32">
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Vehículo</label>
+                                    <FilterSelect
+                                        value={movFilters.vehicleType}
+                                        onChange={v => updateMovFilter('vehicleType', v)}
+                                        options={movVehicleTypeOptions}
+                                        placeholder="Todos"
+                                    />
+                                </div>
+                                <div className="w-32">
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Tarifa</label>
+                                    <div className="relative">
+                                        <select
+                                            value={movFilters.tariffType}
+                                            onChange={e => updateMovFilter('tariffType', e.target.value)}
+                                            className="w-full h-9 appearance-none text-xs bg-white border border-slate-200 rounded-md pl-2 pr-6 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer truncate"
+                                        >
+                                            <option value="">Todas</option>
+                                            <option value="CobroEstadia">Estadía</option>
+                                            <option value="CobroAbono">Abono</option>
+                                        </select>
+                                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Group 3: Rango */}
+                            <div className="flex gap-1 items-end">
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-medium mb-1">Monto Mín/Máx</label>
+                                    <div className="flex items-center gap-1">
+                                        <input
+                                            type="number"
+                                            value={movFilters.amountMin}
+                                            onChange={e => updateMovFilter('amountMin', e.target.value)}
+                                            placeholder="Min"
+                                            className="w-20 h-9 text-xs bg-white border border-slate-200 rounded-md px-2 text-right text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 no-spinner"
+                                        />
+                                        <span className="text-slate-300 text-xs">–</span>
+                                        <input
+                                            type="number"
+                                            value={movFilters.amountMax}
+                                            onChange={e => updateMovFilter('amountMax', e.target.value)}
+                                            placeholder="Max"
+                                            className="w-20 h-9 text-xs bg-white border border-slate-200 rounded-md px-2 text-right text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 no-spinner"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Limpiar Filtros */}
+                            {movFiltersActive && (
+                                <button
+                                    onClick={resetMovFilters}
+                                    className="h-9 px-3 flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-md transition-colors ml-auto"
+                                >
+                                    <FilterX className="h-4 w-4" />
+                                    Limpiar
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Tab Content */}
                 <div className="flex-1 overflow-auto scrollbar-thin">
                     {activeTab === 'movements' ? (
@@ -382,113 +507,25 @@ export default function DashboardHome() {
                             <thead className="sticky top-0 z-20">
                                 {/* Column names */}
                                 <tr className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
-                                    <th className="px-4 py-2 font-semibold w-[90px]">Hora</th>
-                                    <th className="px-4 py-2 font-semibold">Patente / Detalle</th>
-                                    <th className="px-4 py-2 font-semibold">Operador</th>
-                                    <th className="px-4 py-2 font-semibold">Método</th>
-                                    <th className="px-4 py-2 font-semibold text-right">Monto</th>
+                                    <th className="px-2 py-2 font-semibold w-[90px]">Hora</th>
+                                    <th className="px-2 py-2 font-semibold">Patente / Detalle</th>
+                                    <th className="px-2 py-2 font-semibold">Operador</th>
+                                    <th className="px-2 py-2 font-semibold w-[90px]">Método</th>
+                                    <th className="px-2 py-2 font-semibold w-[90px]">Factura</th>
+                                    <th className="px-2 py-2 font-semibold min-w-[250px]">Descripción</th>
+                                    <th className="px-2 py-2 font-semibold text-right">Monto</th>
+                                    <th className="px-2 py-2 font-semibold text-right w-[80px]">Ticket</th>
                                 </tr>
-                                {/* Filter row — also sticky */}
-                                <tr className="bg-white border-b border-slate-100">
-                                    <td className="px-4 py-1.5 align-top">
-                                        <input
-                                            type="date"
-                                            value={movFilters.date}
-                                            onChange={e => updateMovFilter('date', e.target.value)}
-                                            className="w-full text-xs bg-slate-50 border-none rounded-md px-1 py-1 text-slate-700 cursor-pointer focus:ring-1 focus:ring-indigo-500"
-                                            title="Filtrar por fecha"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-1.5 align-top space-y-1.5">
-                                        <div className="relative">
-                                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                                            <input
-                                                type="text"
-                                                value={movFilters.plate}
-                                                onChange={e => updateMovFilter('plate', e.target.value)}
-                                                placeholder="Buscar patente…"
-                                                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-md pl-7 pr-2 py-1 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                                            />
-                                        </div>
-                                        <FilterSelect
-                                            value={movFilters.vehicleType}
-                                            onChange={v => updateMovFilter('vehicleType', v)}
-                                            options={movVehicleTypeOptions}
-                                            placeholder="Tipo de Vehículo"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-1.5 align-top">
-                                        <FilterSelect
-                                            value={movFilters.operator}
-                                            onChange={v => updateMovFilter('operator', v)}
-                                            options={operatorOptions}
-                                            placeholder="Todos"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-1.5 align-top space-y-1.5">
-                                        <FilterSelect
-                                            value={movFilters.method}
-                                            onChange={v => updateMovFilter('method', v)}
-                                            options={methodOptions}
-                                            placeholder="Cualquier Método"
-                                        />
-                                        <div className="relative">
-                                            <select
-                                                value={movFilters.tariffType}
-                                                onChange={e => updateMovFilter('tariffType', e.target.value)}
-                                                className="w-full appearance-none text-xs bg-slate-50 border border-slate-200 rounded-md pl-2 pr-6 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer truncate"
-                                            >
-                                                <option value="">Tipo de Tarifa</option>
-                                                <option value="CobroEstadia">Estadía</option>
-                                                <option value="CobroAbono">Abono</option>
-                                            </select>
-                                            <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-1.5 align-top">
-                                        <div className="flex items-center gap-1">
-                                            <input
-                                                type="number"
-                                                value={movFilters.amountMin}
-                                                onChange={e => updateMovFilter('amountMin', e.target.value)}
-                                                placeholder="Min"
-                                                className="w-16 text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-right text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 no-spinner"
-                                            />
-                                            <span className="text-slate-300 text-[10px]">–</span>
-                                            <input
-                                                type="number"
-                                                value={movFilters.amountMax}
-                                                onChange={e => updateMovFilter('amountMax', e.target.value)}
-                                                placeholder="Max"
-                                                className="w-16 text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-right text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 no-spinner"
-                                            />
-                                        </div>
-                                    </td>
-                                </tr>
-                                {/* Reset button row — only when filters active */}
-                                {movFiltersActive && (
-                                    <tr className="bg-indigo-50/50 border-b border-indigo-100">
-                                        <td colSpan={5} className="px-4 py-1">
-                                            <button
-                                                onClick={resetMovFilters}
-                                                className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
-                                            >
-                                                <FilterX className="h-3 w-3" />
-                                                Limpiar filtros
-                                            </button>
-                                        </td>
-                                    </tr>
-                                )}
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                                 {filteredMovements.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="py-8 text-center text-slate-400">
+                                        <td colSpan={8} className="py-8 text-center text-slate-400">
                                             <div className="flex flex-col items-center gap-1">
                                                 <Inbox className="h-8 w-8 text-slate-200" />
                                                 <p className="text-sm font-medium text-slate-500">
                                                     {movFiltersActive
-                                                        ? movFilters.date ? 'No hay movimientos para esta fecha con estos filtros' : 'No se encontraron resultados para los filtros aplicados'
+                                                        ? 'No se encontraron resultados para los filtros aplicados'
                                                         : 'No hay movimientos recientes'}
                                                 </p>
                                                 <p className="text-[11px] text-slate-400">
@@ -502,17 +539,17 @@ export default function DashboardHome() {
                                 ) : (
                                     filteredMovements.map(move => (
                                         <tr key={move.id} className="hover:bg-indigo-50/30 transition-colors">
-                                            <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
+                                            <td className="px-2 py-2 text-xs text-slate-500 whitespace-nowrap">
                                                 <span className="font-semibold text-slate-700">{formatTime24(move.timestamp)}</span>
                                                 <span className="block text-[9px] text-slate-400">{formatDateDM(move.timestamp)}</span>
                                             </td>
-                                            <td className="px-4 py-2">
+                                            <td className="px-2 py-2">
                                                 <div className="font-bold text-slate-800 font-mono text-[13px]">{move.plate || '---'}</div>
                                                 <div className="text-[9px] uppercase text-indigo-600 font-medium">
                                                     {move.plate ? (vehicleMap[move.plate] || 'Vehículo') : move.type}
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-2">
+                                            <td className="px-2 py-2">
                                                 <div className="flex items-center gap-1.5 text-slate-600 text-xs font-medium">
                                                     <div className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[9px] uppercase shrink-0">
                                                         {(move.operator || move.operator_name || 'S')[0]}
@@ -520,9 +557,9 @@ export default function DashboardHome() {
                                                     <span className="truncate max-w-[120px]">{move.operator || move.operator_name || 'Sistema'}</span>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-2">
+                                            <td className="px-2 py-2">
                                                 <span className={cn(
-                                                    "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border",
+                                                    "px-1 py-0 rounded text-[10px] font-bold uppercase border",
                                                     (move.payment_method || '').toUpperCase() === 'EFECTIVO'
                                                         ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                                         : "bg-indigo-50 text-indigo-700 border-indigo-200"
@@ -530,8 +567,30 @@ export default function DashboardHome() {
                                                     {move.payment_method || '---'}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-2 text-right font-bold text-slate-900 font-mono text-sm">
+                                            <td className="px-2 py-2">
+                                                {move.invoice_type ? (
+                                                    <span className={cn(
+                                                        "px-1 py-0 rounded text-[10px] font-bold uppercase",
+                                                        move.invoice_type === 'CC' ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"
+                                                    )}>
+                                                        {move.invoice_type}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400 text-xs">---</span>
+                                                )}
+                                            </td>
+                                            <td className="px-2 py-2" title={move.notes}>
+                                                <div className="text-xs text-slate-600 whitespace-normal break-words">
+                                                    {formatNotesCurrency(move.notes)}
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-2 text-right font-bold text-slate-900 font-mono text-sm">
                                                 {formatCurrency(move.amount)}
+                                            </td>
+                                            <td className="px-2 py-2 text-right font-mono text-xs text-slate-500">
+                                                {move.ticket_code
+                                                    ? String(Number(move.ticket_code)).padStart(4, '0')
+                                                    : '---'}
                                             </td>
                                         </tr>
                                     ))

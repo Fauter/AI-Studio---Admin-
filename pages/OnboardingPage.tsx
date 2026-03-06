@@ -61,6 +61,16 @@ const ROLE_UI_CONFIG: Record<string, { label: string; weight: number; style: str
   [UserRole.OWNER]: { label: 'Dueño', weight: 0, style: 'bg-slate-900 text-white border-slate-700' },
 };
 
+const OPERATIVE_SECTIONS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'abonos', label: 'Abonos' },
+  { id: 'precios', label: 'Gestión de Precios' },
+  { id: 'finanzas', label: 'Finanzas & Punitorios' },
+  { id: 'cierres', label: 'Cierres de Caja' },
+  { id: 'incidentes', label: 'Incidentes' },
+  { id: 'ajustes', label: 'Configuración' },
+];
+
 // --- GESTIÓN DE PERSONAL (MISSION 1 & 2) ---
 const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
   const { user, profile, shadowUser } = useAuth();
@@ -476,12 +486,12 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                           </button>
                         ))
                       ) : (
-                        ['precios', 'finanzas', 'ajustes'].map(sec => (
-                          <button key={sec} onClick={() => toggleSection(sec)} className={cn("flex items-center gap-3 p-3 rounded-lg border transition-all text-left", permDraft.sections.includes(sec) ? "bg-blue-50 border-blue-200 text-blue-800" : "bg-white border-slate-200 text-slate-500")}>
-                            <div className={cn("h-5 w-5 rounded border flex items-center justify-center", permDraft.sections.includes(sec) ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300")}>
-                              {permDraft.sections.includes(sec) && <CheckSquare className="h-3.5 w-3.5" />}
+                        OPERATIVE_SECTIONS.map(sec => (
+                          <button key={sec.id} onClick={() => toggleSection(sec.id)} className={cn("flex items-center gap-3 p-3 rounded-lg border transition-all text-left", permDraft.sections.includes(sec.id) ? "bg-blue-50 border-blue-200 text-blue-800" : "bg-white border-slate-200 text-slate-500")}>
+                            <div className={cn("h-5 w-5 rounded border flex items-center justify-center", permDraft.sections.includes(sec.id) ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300")}>
+                              {permDraft.sections.includes(sec.id) && <CheckSquare className="h-3.5 w-3.5" />}
                             </div>
-                            <span className="font-bold text-sm capitalize">{sec}</span>
+                            <span className="font-bold text-sm">{sec.label}</span>
                           </button>
                         ))
                       )}

@@ -150,9 +150,7 @@ export default function DashboardLayout() {
 
     // 3. Administrative -> Filtered by Permissions (Business Rule #2)
     if (shadowUser && shadowUser.role === UserRole.ADMINISTRATIVE) {
-      // Dashboard is always base access
-      if (link.id === 'dashboard') return true;
-      // Check granular permissions
+      // Check granular permissions for all sections
       return shadowUser.permissions?.sections?.includes(link.id);
     }
 
