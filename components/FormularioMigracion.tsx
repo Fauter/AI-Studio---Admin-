@@ -67,6 +67,9 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
         domicilio: '',
         localidad: '',
         telParticular: '',
+        work_address: '',
+        emergency_phone: '',
+        work_phone: '',
 
         initialDebtAmount: 0
     });
@@ -92,7 +95,10 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                 email: preloadedCustomer.email || '',
                 domicilio: preloadedCustomer.address || '',
                 localidad: preloadedCustomer.localidad || '',
-                telParticular: preloadedCustomer.phone || ''
+                telParticular: preloadedCustomer.phone || '',
+                work_address: preloadedCustomer.work_address || '',
+                emergency_phone: preloadedCustomer.emergency_phone || '',
+                work_phone: preloadedCustomer.work_phone || ''
             }));
             setDniAlreadyExists(false);
         } else {
@@ -103,7 +109,10 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                 email: '',
                 domicilio: '',
                 localidad: '',
-                telParticular: ''
+                telParticular: '',
+                work_address: '',
+                emergency_phone: '',
+                work_phone: ''
             }));
             setDniAlreadyExists(false);
         }
@@ -303,7 +312,10 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                     email: formData.email,
                     phone: formData.telParticular,
                     address: formData.domicilio,
-                    localidad: formData.localidad
+                    localidad: formData.localidad,
+                    work_address: formData.work_address,
+                    emergency_phone: formData.emergency_phone,
+                    work_phone: formData.work_phone
                 };
                 if (ownerId) customerPayload.owner_id = ownerId;
 
@@ -461,6 +473,9 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                     domicilio: '',
                     localidad: '',
                     telParticular: '',
+                    work_address: '',
+                    emergency_phone: '',
+                    work_phone: '',
                     initialDebtAmount: 0
                 }));
             } else {
@@ -653,6 +668,25 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                                     <label className={labelClass}>Localidad</label>
                                     <MapPin className="h-4 w-4 absolute left-3.5 top-[34px] text-slate-400" />
                                     <input className={cn(inputClass, isAddingToExisting && "bg-slate-50 text-slate-400 border-dashed border-slate-200 shadow-none")} disabled={isAddingToExisting} value={formData.localidad} onChange={e => handleInputChange('localidad', e.target.value)} />
+                                </div>
+                            </div>
+
+                            {/* Fila 4: Teléfonos adicionales y Laboral (grid 3 columnas) */}
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="relative">
+                                    <label className={labelClass}>Teléfono de Emergencia</label>
+                                    <Phone className="h-4 w-4 absolute left-3.5 top-[34px] text-red-400" />
+                                    <input className={cn(inputClass, isAddingToExisting && "bg-slate-50 text-slate-400 border-dashed border-slate-200 shadow-none", "border-red-200 focus:border-red-400")} disabled={isAddingToExisting} value={formData.emergency_phone} onChange={e => handleInputChange('emergency_phone', e.target.value)} />
+                                </div>
+                                <div className="relative">
+                                    <label className={labelClass}>Teléfono Laboral</label>
+                                    <Phone className="h-4 w-4 absolute left-3.5 top-[34px] text-slate-400" />
+                                    <input className={cn(inputClass, isAddingToExisting && "bg-slate-50 text-slate-400 border-dashed border-slate-200 shadow-none")} disabled={isAddingToExisting} value={formData.work_phone} onChange={e => handleInputChange('work_phone', e.target.value)} />
+                                </div>
+                                <div className="relative">
+                                    <label className={labelClass}>Domicilio Laboral</label>
+                                    <MapPin className="h-4 w-4 absolute left-3.5 top-[34px] text-slate-400" />
+                                    <input className={cn(inputClass, isAddingToExisting && "bg-slate-50 text-slate-400 border-dashed border-slate-200 shadow-none")} disabled={isAddingToExisting} value={formData.work_address} onChange={e => handleInputChange('work_address', e.target.value)} />
                                 </div>
                             </div>
                         </div>

@@ -19,11 +19,14 @@ import {
   Search,
   UserPlus,
   Phone,
-  Mail
+  Mail,
+  Edit,
+  Plus
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BuildingConfigPage from './BuildingConfig';
 import FormularioMigracion from '../components/FormularioMigracion';
+import EditorCliente from '../components/EditorCliente';
 import { Garage } from '../types';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -284,7 +287,7 @@ const DataLoadingTab = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'list' | 'form'>('list');
+  const [view, setView] = useState<'list' | 'form' | 'editor'>('list');
 
   const fetchCustomers = async () => {
     if (!garageId) return;
@@ -320,6 +323,26 @@ const DataLoadingTab = () => {
         <FormularioMigracion
           garageId={garageId || ''}
           preloadedCustomer={selectedCustomer}
+          onSuccess={() => {
+            fetchCustomers();
+            setSelectedCustomer(null);
+            setView('list');
+          }}
+          onBack={() => {
+            setSelectedCustomer(null);
+            setView('list');
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'editor' && selectedCustomer) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm animate-in fade-in zoom-in-95 w-full">
+        <EditorCliente
+          garageId={garageId || ''}
+          customer={selectedCustomer}
           onSuccess={() => {
             fetchCustomers();
             setSelectedCustomer(null);
@@ -390,11 +413,7 @@ const DataLoadingTab = () => {
                   {filteredCustomers.map(c => (
                     <tr
                       key={c.id}
-                      onClick={() => {
-                        setSelectedCustomer(c);
-                        setView('form');
-                      }}
-                      className="group hover:bg-slate-50/80 transition-colors cursor-pointer"
+                      className="group hover:bg-slate-50/80 transition-colors"
                     >
                       <td className="py-3 px-6">
                         <span className="font-bold text-slate-800 text-sm group-hover:text-indigo-700 transition-colors block">{c.name}</span>
@@ -417,9 +436,28 @@ const DataLoadingTab = () => {
                         </div>
                       </td>
                       <td className="py-3 px-6 text-right">
-                        <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider bg-indigo-50 px-3 py-1 pb-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-sm">
-                          Seleccionar &rarr;
-                        </span>
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setSelectedCustomer(c);
+                              setView('form');
+                            }}
+                            className="p-2 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 transition-all shadow-sm"
+                            title="Añadir Cochera"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedCustomer(c);
+                              setView('editor');
+                            }}
+                            className="p-2 text-slate-400 hover:text-emerald-600 bg-white border border-slate-200 rounded-lg hover:border-emerald-300 transition-all shadow-sm"
+                            title="Editar/Gestionar"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
