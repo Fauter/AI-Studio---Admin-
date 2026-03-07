@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import {
     User, Car, MapPin, Phone, Mail, Save, Loader2, AlertCircle, CheckCircle2,
-    Trash2, Building2, Fingerprint, ArrowLeft, Unlink, ChevronDown, ChevronUp
+    Trash2, Building2, Fingerprint, ArrowLeft, Unlink, ChevronDown, ChevronUp,
+    Banknote, Plus
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -19,10 +20,16 @@ interface EditorClienteProps {
 }
 
 export default function EditorCliente({ garageId, customer, onSuccess, onBack }: EditorClienteProps) {
-    const [activeTab, setActiveTab] = useState<'personales' | 'cocheras'>('personales');
+    const [activeTab, setActiveTab] = useState<'personales' | 'cocheras' | 'deudas'>('personales');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+    const [debts, setDebts] = useState<any[]>([]);
+
+    // Add Debt Modal
+    const [showAddDebtModal, setShowAddDebtModal] = useState(false);
+    const [newDebtData, setNewDebtData] = useState({ amount: '' });
 
     // Data states
     const [formData, setFormData] = useState({
@@ -75,14 +82,15 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
     const fetchExtraData = async () => {
         setLoading(true);
         try {
-            const [vehRes, cochRes, typesRes, tariffsRes, pricesRes, subsRes, levelsRes] = await Promise.all([
+            const [vehRes, cochRes, typesRes, tariffsRes, pricesRes, subsRes, levelsRes, debtsRes] = await Promise.all([
                 supabase.from('vehicles').select('*').eq('customer_id', customer.id),
                 supabase.from('cocheras').select('*').eq('cliente_id', customer.id),
                 supabase.from('vehicle_types').select('*').eq('garage_id', garageId).order('sort_order'),
                 supabase.from('tariffs').select('*').eq('garage_id', garageId).eq('type', 'abono'),
                 supabase.from('prices').select('*').eq('garage_id', garageId).eq('price_list', 'standard'),
                 supabase.from('subscriptions').select('*').eq('customer_id', customer.id).eq('active', true),
-                supabase.from('building_levels').select('*').eq('garage_id', garageId).order('sort_order')
+                supabase.from('building_levels').select('*').eq('garage_id', garageId).order('sort_order'),
+                supabase.from('debts').select('*').eq('customer_id', customer.id).eq('garage_id', garageId).order('due_date', { ascending: false })
             ]);
 
             if (vehRes.data) setVehicles(vehRes.data);
@@ -92,6 +100,7 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
             if (pricesRes.data) setPrices(pricesRes.data);
             if (subsRes.data) setSubscriptions(subsRes.data);
             if (levelsRes.data) setBuildingLevels(levelsRes.data);
+            if (debtsRes.data) setDebts(debtsRes.data);
         } catch (err) {
             console.error('Error fetching customer details:', err);
         } finally {
@@ -101,6 +110,65 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleDeleteDebt = async (debtId: string) => {
+        if (!window.confirm("¿Eliminar este registro de deuda manual de forma permanente? No quedará registro en caja ni historial.")) return;
+        setSaving(true);
+        setFeedback(null);
+        try {
+            const { error } = await supabase.from('debts').delete().eq('id', debtId);
+            if (error) throw error;
+            setFeedback({ type: 'success', text: 'Deuda eliminada correctamente.' });
+            setTimeout(() => setFeedback(null), 3000);
+            await fetchExtraData();
+        } catch (err: any) {
+            console.error(err);
+            setFeedback({ type: 'error', text: err.message || 'Error al eliminar deuda.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAddDebtSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSaving(true);
+        setFeedback(null);
+        try {
+            if (!newDebtData.amount || Number(newDebtData.amount) <= 0) {
+                throw new Error("Ingrese un monto válido mayor a 0.");
+            }
+            if (!subscriptions || subscriptions.length === 0) {
+                throw new Error("El cliente no tiene ninguna suscripción activa para vincular la deuda.");
+            }
+
+            const activeSub = subscriptions[0]; // first active sub as requested
+
+            const debtPayload: any = {
+                garage_id: garageId,
+                customer_id: customer.id,
+                subscription_id: activeSub.id,
+                amount: Number(newDebtData.amount),
+                status: 'PENDING',
+                type: 'MANUAL_MIGRATION',
+                due_date: new Date().toISOString(),
+                surcharge_applied: 0 // Optional, but consistent with FormularioMigracion
+            };
+
+            const { error } = await supabase.from('debts').insert(debtPayload);
+            if (error) throw error;
+
+            setFeedback({ type: 'success', text: 'Deuda manual añadida correctamente.' });
+            setNewDebtData({ amount: '' });
+            setShowAddDebtModal(false);
+            setTimeout(() => setFeedback(null), 3000);
+            await fetchExtraData();
+        } catch (err: any) {
+            console.error(err);
+            setFeedback({ type: 'error', text: err.message || 'Error al crear deuda manual.' });
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleSavePersonales = async (e: React.FormEvent) => {
@@ -374,6 +442,9 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                     <button onClick={() => setActiveTab('cocheras')} className={cn("text-left px-4 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-3", activeTab === 'cocheras' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-100/80")}>
                         <Building2 className="w-4 h-4" /> Gestión de Cocheras
                     </button>
+                    <button onClick={() => setActiveTab('deudas')} className={cn("text-left px-4 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-3", activeTab === 'deudas' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-100/80")}>
+                        <Banknote className="w-4 h-4" /> Deudas
+                    </button>
                     <div className="mt-auto pt-6 border-t border-slate-200">
                         <button onClick={() => setShowDeleteModal(true)} className="w-full text-left px-4 py-3 rounded-xl font-bold text-sm text-red-600 hover:bg-red-50 hover:text-red-700 transition-all flex items-center gap-3">
                             <Trash2 className="w-4 h-4" /> Eliminar Cliente
@@ -645,8 +716,135 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                             )}
                         </div>
                     )}
+
+                    {activeTab === 'deudas' && (
+                        <div className="animate-in fade-in slide-in-from-bottom-2 pb-8 max-w-4xl mx-auto space-y-6">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Banknote className="w-5 h-5 text-indigo-500" />
+                                    Estado de Cuenta
+                                </h3>
+                                <button
+                                    onClick={() => setShowAddDebtModal(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl font-bold text-sm transition-all shadow-sm"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Añadir Deuda Manual
+                                </button>
+                            </div>
+
+                            {debts.length === 0 ? (
+                                <div className="p-8 text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl">
+                                    El cliente no tiene deudas registradas en este momento.
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-4">
+                                    {debts.map((debt, idx) => (
+                                        <div key={debt.id || idx} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between shadow-sm hover:shadow-md transition-all">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-lg font-black text-slate-800">
+                                                        {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(debt.amount)}
+                                                    </span>
+                                                    {debt.status === 'PAID' ? (
+                                                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] font-bold uppercase tracking-wider">
+                                                            Abonado
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 border border-amber-200 text-[10px] font-bold uppercase tracking-wider">
+                                                            Pendiente
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs font-medium text-slate-500 mt-1">
+                                                    <span>
+                                                        Vto: {new Date(debt.due_date).toLocaleDateString('es-AR')}
+                                                    </span>
+                                                    <span className="w-1 h-1 rounded-full bg-slate-300" />
+                                                    <span className="flex items-center gap-1">
+                                                        {debt.type === 'MANUAL_MIGRATION' ? (
+                                                            <span className="text-indigo-600 bg-indigo-50 px-1.5 rounded">Carga Manual</span>
+                                                        ) : (
+                                                            <span className="text-slate-600 bg-slate-100 px-1.5 rounded">Abono Mensual</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-3">
+                                                {debt.type === 'MANUAL_MIGRATION' && (
+                                                    <button
+                                                        onClick={() => handleDeleteDebt(debt.id)}
+                                                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                        title="Eliminar Deuda (Silencioso)"
+                                                    >
+                                                        <Trash2 className="w-5 h-5" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
+
+            {showAddDebtModal && (
+                <div className="absolute inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <form onSubmit={handleAddDebtSubmit} className="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in zoom-in-95">
+                        <div className="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
+                                <Plus className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900">Añadir Deuda Manual</h3>
+                                <p className="text-xs text-slate-500">Se registrará como Carga Manual</p>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Monto (ARS) *</label>
+                                <div className="relative">
+                                    <span className="absolute left-4 top-3 text-slate-400 font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="1"
+                                        className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                                        placeholder="0"
+                                        value={newDebtData.amount}
+                                        onChange={e => setNewDebtData(prev => ({ ...prev, amount: e.target.value }))}
+                                    />
+                                </div>
+                            </div>
+                            {(!subscriptions || subscriptions.length === 0) && (
+                                <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                                    El cliente no tiene suscripciones activas. No se podrá crear la deuda.
+                                </p>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => { setShowAddDebtModal(false); setNewDebtData({ amount: '' }); }}
+                                className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-lg transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={saving || !subscriptions || subscriptions.length === 0}
+                                className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                            >
+                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {showDeleteModal && (
                 <div className="absolute inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
