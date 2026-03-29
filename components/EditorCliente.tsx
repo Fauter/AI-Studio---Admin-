@@ -31,6 +31,13 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
     const [showAddDebtModal, setShowAddDebtModal] = useState(false);
     const [newDebtData, setNewDebtData] = useState({ amount: '' });
 
+    // Add Vehicle Modal
+    const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
+    const [selectedCocheraForVehicle, setSelectedCocheraForVehicle] = useState<any>(null);
+    const [newVehicleData, setNewVehicleData] = useState({
+        patente: '', type: '', marca: '', modelo: '', color: '', year: '', insurance: ''
+    });
+
     // Data states
     const [formData, setFormData] = useState({
         nombre: '',
@@ -87,7 +94,7 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                 supabase.from('cocheras').select('*').eq('cliente_id', customer.id),
                 supabase.from('vehicle_types').select('*').eq('garage_id', garageId).order('sort_order'),
                 supabase.from('tariffs').select('*').eq('garage_id', garageId).eq('type', 'abono'),
-                supabase.from('prices').select('*').eq('garage_id', garageId).eq('price_list', 'standard'),
+                supabase.from('prices').select('*').eq('garage_id', garageId).in('price_list', ['standard', 'electronic']),
                 supabase.from('subscriptions').select('*').eq('customer_id', customer.id).eq('active', true),
                 supabase.from('building_levels').select('*').eq('garage_id', garageId).order('sort_order'),
                 supabase.from('debts').select('*').eq('customer_id', customer.id).eq('garage_id', garageId).order('due_date', { ascending: false })
@@ -166,6 +173,129 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
         } catch (err: any) {
             console.error(err);
             setFeedback({ type: 'error', text: err.message || 'Error al crear deuda manual.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const isVehicleTypeValid = (vehicleTypeId: string, cochera: any): boolean => {
+        if (!cochera) return false;
+        const targetTariffName = cochera.tipo === 'Exclusiva' ? 'Exclusiva' : cochera.tipo;
+        const activeTariff = tariffs.find(t =>
+            t.name.toLowerCase().includes(targetTariffName.toLowerCase())
+        );
+        if (!activeTariff) return false;
+
+        const hasStandard = prices.some(p =>
+            p.tariff_id === activeTariff.id &&
+            p.vehicle_type_id === vehicleTypeId &&
+            p.price_list === 'standard'
+        );
+        const hasElectronic = prices.some(p =>
+            p.tariff_id === activeTariff.id &&
+            p.vehicle_type_id === vehicleTypeId &&
+            p.price_list === 'electronic'
+        );
+        return hasStandard && hasElectronic;
+    };
+
+    const handleAddVehicleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSaving(true);
+        setFeedback(null);
+        try {
+            const cochera = selectedCocheraForVehicle;
+            if (!cochera) throw new Error("No hay cochera seleccionada.");
+
+            const cleanedPlate = newVehicleData.patente.trim().toUpperCase();
+            if (!cleanedPlate) throw new Error("La patente no puede estar vacía.");
+            if (!newVehicleData.type) throw new Error("Debe seleccionar un tipo de vehículo.");
+
+            if (!isVehicleTypeValid(newVehicleData.type, cochera)) {
+                throw new Error("El tipo de vehículo seleccionado no tiene la lista de precios completa (Standard y Electronic) para esta cochera.");
+            }
+
+            const targetTariffName = cochera.tipo === 'Exclusiva' ? 'Exclusiva' : cochera.tipo;
+            const activeTariff = tariffs.find(t => t.name.toLowerCase().includes(targetTariffName.toLowerCase()));
+            if (!activeTariff) throw new Error("No se encontró tarifa para este tipo de cochera.");
+
+            const priceRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === newVehicleData.type && p.price_list === 'standard');
+            if (!priceRecord) throw new Error("Este tipo de vehículo no tiene precio configurado para esta cochera.");
+
+            const newVehiclePrice = Number(priceRecord.amount);
+
+            let currentMaxPrice = cochera.precio_base || 0;
+            const cVehicles = vehicles.filter((v: any) => (cochera.vehiculos || []).includes(v.plate));
+            let maxExistingPrice = 0;
+
+            for (const v of cVehicles) {
+                if (!v.type) continue;
+                let vTypeName = vehicleTypes.find(vt => vt.id === v.type)?.name || v.type;
+                const typeObj = vehicleTypes.find(vt => vt.name === vTypeName || vt.id === v.type);
+                if (activeTariff && typeObj) {
+                    const pRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === typeObj.id && p.price_list === 'standard');
+                    if (pRecord && Number(pRecord.amount) > maxExistingPrice) {
+                        maxExistingPrice = Number(pRecord.amount);
+                    }
+                }
+            }
+
+            const finalBasePrice = Math.max(currentMaxPrice, maxExistingPrice, newVehiclePrice);
+
+            const vTypeName = vehicleTypes.find(vt => vt.id === newVehicleData.type)?.name || 'Auto';
+
+            const { data: existingVehicle } = await supabase
+                .from('vehicles')
+                .select('id')
+                .eq('garage_id', garageId)
+                .eq('plate', cleanedPlate)
+                .maybeSingle();
+
+            const vPayload = {
+                garage_id: garageId,
+                customer_id: customer.id,
+                plate: cleanedPlate,
+                type: vTypeName,
+                brand: newVehicleData.marca,
+                model: newVehicleData.modelo,
+                color: newVehicleData.color,
+                year: newVehicleData.year,
+                insurance: newVehicleData.insurance,
+                is_subscriber: true
+            };
+
+            if (customer.owner_id) {
+                (vPayload as any).owner_id = customer.owner_id;
+            }
+
+            if (existingVehicle) {
+                const { error: updErr } = await supabase.from('vehicles').update(vPayload).eq('id', existingVehicle.id);
+                if (updErr) throw updErr;
+            } else {
+                const { error: insErr } = await supabase.from('vehicles').insert(vPayload);
+                if (insErr) throw insErr;
+            }
+
+            const currentPlates = [...(cochera.vehiculos || [])];
+            if (!currentPlates.includes(cleanedPlate)) {
+                currentPlates.push(cleanedPlate);
+            }
+
+            const { error: cErr } = await supabase.from('cocheras').update({
+                vehiculos: currentPlates,
+                precio_base: finalBasePrice
+            }).eq('id', cochera.id);
+            if (cErr) throw cErr;
+
+            setFeedback({ type: 'success', text: 'Vehículo añadido correctamente. Precio actualizado.' });
+            setShowAddVehicleModal(false);
+            setNewVehicleData({ patente: '', type: '', marca: '', modelo: '', color: '', year: '', insurance: '' });
+            setTimeout(() => setFeedback(null), 3000);
+            await fetchExtraData();
+
+        } catch (err: any) {
+            console.error(err);
+            setFeedback({ type: 'error', text: err.message || 'Error al añadir vehículo.' });
         } finally {
             setSaving(false);
         }
@@ -343,7 +473,7 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                 const typeObj = vehicleTypes.find(vt => vt.name === vTypeName || vt.id === v.type);
 
                 if (activeTariff && typeObj) {
-                    const priceRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === typeObj.id);
+                    const priceRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === typeObj.id && p.price_list === 'standard');
                     if (priceRecord && Number(priceRecord.amount) > maxPrice) {
                         maxPrice = Number(priceRecord.amount);
                     }
@@ -616,9 +746,24 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                                                 </div>
 
                                                 <div className="space-y-3">
-                                                    <h4 className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-500 tracking-wider">
-                                                        <Car className="w-3 h-3 text-indigo-400" /> Vehículos Vinculados
-                                                    </h4>
+                                                    <div className="flex items-center justify-between">
+                                                        <h4 className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                                                            <Car className="w-3 h-3 text-indigo-400" /> Vehículos Vinculados
+                                                        </h4>
+                                                        {cochera.tipo !== 'Movil' && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setSelectedCocheraForVehicle(cochera);
+                                                                    setNewVehicleData({ patente: '', type: '', marca: '', modelo: '', color: '', year: '', insurance: '' });
+                                                                    setShowAddVehicleModal(true);
+                                                                }}
+                                                                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-black text-[9px] uppercase tracking-wider transition-all"
+                                                            >
+                                                                <Plus className="w-3 h-3" /> Añadir
+                                                            </button>
+                                                        )}
+                                                    </div>
 
                                                     {cVehicles.length === 0 ? (
                                                         <p className="text-xs text-slate-400 italic">No hay vehículos asignados a esta cochera.</p>
@@ -840,6 +985,98 @@ export default function EditorCliente({ garageId, customer, onSuccess, onBack }:
                             >
                                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 Guardar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {showAddVehicleModal && (
+                <div className="absolute inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <form onSubmit={handleAddVehicleSubmit} className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+                        <div className="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50 shrink-0">
+                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
+                                <Car className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900">Añadir Vehículo Adicional</h3>
+                                <p className="text-xs text-slate-500">Cochera {selectedCocheraForVehicle?.numero || 'S/N'} ({selectedCocheraForVehicle?.tipo})</p>
+                            </div>
+                        </div>
+                        <div className="p-6 grid grid-cols-2 gap-4 overflow-y-auto">
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Dominio / Patente *</label>
+                                <input
+                                    required
+                                    className="w-full pl-4 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-black text-slate-800 uppercase tracking-widest text-center"
+                                    placeholder="AAA 000"
+                                    value={newVehicleData.patente}
+                                    onChange={e => setNewVehicleData(prev => ({ ...prev, patente: e.target.value.toUpperCase() }))}
+                                />
+                            </div>
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Tipo de Vehículo *</label>
+                                <select
+                                    required
+                                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700 text-sm"
+                                    value={newVehicleData.type}
+                                    onChange={e => setNewVehicleData(prev => ({ ...prev, type: e.target.value }))}
+                                >
+                                    <option value="" disabled hidden>Seleccionar...</option>
+                                    {vehicleTypes.map(v => {
+                                        const valid = isVehicleTypeValid(v.id, selectedCocheraForVehicle);
+                                        return (
+                                            <option
+                                                key={v.id}
+                                                value={v.id}
+                                                disabled={!valid}
+                                                title={!valid ? "Este tipo de vehículo no tiene configurados los precios Standard y Electrónico." : ""}
+                                            >
+                                                {v.name} {!valid && '⚠ (Sin precios configurados)'}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Marca</label>
+                                <input className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium" value={newVehicleData.marca} onChange={e => setNewVehicleData(prev => ({ ...prev, marca: e.target.value }))} placeholder="Ej. Ford" />
+                            </div>
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Modelo</label>
+                                <input className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium" value={newVehicleData.modelo} onChange={e => setNewVehicleData(prev => ({ ...prev, modelo: e.target.value }))} placeholder="Ej. Focus" />
+                            </div>
+
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Año</label>
+                                <input className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium" value={newVehicleData.year} onChange={e => setNewVehicleData(prev => ({ ...prev, year: e.target.value }))} placeholder="0000" />
+                            </div>
+                            <div className="col-span-1">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Color</label>
+                                <input className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium" value={newVehicleData.color} onChange={e => setNewVehicleData(prev => ({ ...prev, color: e.target.value }))} placeholder="Color" />
+                            </div>
+
+                            <div className="col-span-2">
+                                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 block">Compañía de Seguro</label>
+                                <input className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium" value={newVehicleData.insurance} onChange={e => setNewVehicleData(prev => ({ ...prev, insurance: e.target.value }))} placeholder="Aseguradora" />
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 shrink-0">
+                            <button
+                                type="button"
+                                onClick={() => { setShowAddVehicleModal(false); setNewVehicleData({ patente: '', type: '', marca: '', modelo: '', color: '', year: '', insurance: '' }); }}
+                                className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-lg transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={saving}
+                                className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                            >
+                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar Vehículo
                             </button>
                         </div>
                     </form>
