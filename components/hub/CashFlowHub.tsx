@@ -1589,7 +1589,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             {isEficaciaModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setIsEficaciaModalOpen(false)}>
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg min-h-[520px] max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
                         onClick={e => e.stopPropagation()}>
                         {/* Header */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
@@ -1601,12 +1601,14 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                                    <button onClick={() => setEficaciaMonthOffset(prev => prev + 1)} className="p-1.5 rounded hover:bg-white hover:shadow-sm text-slate-500 transition-all">
+                                <div className="flex items-center justify-between gap-1 bg-slate-100 rounded-lg p-1 min-w-[140px]">
+                                    <button onClick={() => setEficaciaMonthOffset(prev => prev + 1)} className="p-1.5 rounded hover:bg-white hover:shadow-sm text-slate-500 transition-all shrink-0">
                                         <ChevronDown className="h-3.5 w-3.5" />
                                     </button>
-                                    <span className="text-xs font-semibold px-2 text-slate-600">Meses</span>
-                                    <button onClick={() => setEficaciaMonthOffset(prev => Math.max(0, prev - 1))} className="p-1.5 rounded hover:bg-white hover:shadow-sm text-slate-500 transition-all" disabled={eficaciaMonthOffset === 0}>
+                                    <span className="text-xs font-semibold px-2 text-slate-600 capitalize text-center flex-1">
+                                        {eficaciaTimeline.monthLabel}
+                                    </span>
+                                    <button onClick={() => setEficaciaMonthOffset(prev => Math.max(0, prev - 1))} className="p-1.5 rounded hover:bg-white hover:shadow-sm text-slate-500 transition-all shrink-0" disabled={eficaciaMonthOffset === 0}>
                                         <ChevronUp className="h-3.5 w-3.5" />
                                     </button>
                                 </div>
