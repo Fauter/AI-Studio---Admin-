@@ -43,7 +43,7 @@ interface VehicleData {
 
 export default function FormularioMigracion({ garageId, preloadedCustomer, onSuccess, onBack }: FormularioMigracionProps) {
     // --- STATE ---
-    const [loading, setLoading] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     // Data Loading
@@ -277,10 +277,14 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
     // --- SUBMIT: THE MIGRATION LOGIC ---
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
+
+        // ── CONCURRENCY GUARD: Bloqueo inmediato ante el primer clic ──
+        if (isSubmitting) return;
+        setIsSubmitting(true);
         setFeedback(null);
 
         try {
+            // ── PRE-VALIDACIONES SINCRÓNICAS ──
             if (!formData.tipoCochera) throw new Error("Seleccione un tipo de cochera.");
             if ((formData.tipoCochera === 'Fija' || formData.exclusivaOverride) && !formData.numeroCochera) {
                 throw new Error("Especifique el número de la cochera.");
@@ -289,94 +293,139 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                 throw new Error("Complete los datos mínimos del cliente (DNI, Nombre).");
             }
 
-            // Validate all vehicles
             const invalidVehicles = vehicles.some(v => !v.patente.trim() || !v.vehicleTypeId);
             if (invalidVehicles) {
                 throw new Error("Todos los vehículos añadidos deben tener Patente y Tipo.");
             }
 
-            // Cleanup
             const cleanedDni = formData.dni.trim();
             const finalType = formData.exclusivaOverride ? 'Exclusiva' : formData.tipoCochera;
 
-            // 1. Upsert Customer
+            // ══════════════════════════════════════════════════════════════
+            // ETAPA 1: CLIENTE — Búsqueda idempotente antes de creación
+            // ══════════════════════════════════════════════════════════════
             let customerId: string;
 
             if (isAddingToExisting) {
                 customerId = preloadedCustomer.id;
             } else {
-                const customerPayload: any = {
-                    garage_id: garageId,
-                    dni: cleanedDni,
-                    name: formData.nombre,
-                    email: formData.email,
-                    phone: formData.telParticular,
-                    address: formData.domicilio,
-                    localidad: formData.localidad,
-                    work_address: formData.work_address,
-                    emergency_phone: formData.emergency_phone,
-                    work_phone: formData.work_phone
-                };
-                if (ownerId) customerPayload.owner_id = ownerId;
+                try {
+                    // Buscar por DNI + garage_id para evitar duplicados
+                    const { data: existingCustomer, error: lookupErr } = await supabase
+                        .from('customers')
+                        .select('id')
+                        .eq('garage_id', garageId)
+                        .eq('dni', cleanedDni)
+                        .maybeSingle();
 
-                const { data, error } = await supabase.from('customers').insert(customerPayload).select().single();
-                if (error) throw error;
-                customerId = data.id;
+                    if (lookupErr) throw lookupErr;
+
+                    if (existingCustomer) {
+                        // Cliente ya existe → reusar su ID, actualizar datos de contacto
+                        customerId = existingCustomer.id;
+                        const updatePayload: any = {
+                            name: formData.nombre,
+                            email: formData.email,
+                            phone: formData.telParticular,
+                            address: formData.domicilio,
+                            localidad: formData.localidad,
+                            work_address: formData.work_address,
+                            emergency_phone: formData.emergency_phone,
+                            work_phone: formData.work_phone
+                        };
+                        const { error: updateErr } = await supabase
+                            .from('customers')
+                            .update(updatePayload)
+                            .eq('id', customerId);
+                        if (updateErr) console.warn('Advertencia: No se pudieron actualizar datos del cliente existente:', updateErr);
+                    } else {
+                        // Cliente nuevo → insertar
+                        const customerPayload: any = {
+                            garage_id: garageId,
+                            dni: cleanedDni,
+                            name: formData.nombre,
+                            email: formData.email,
+                            phone: formData.telParticular,
+                            address: formData.domicilio,
+                            localidad: formData.localidad,
+                            work_address: formData.work_address,
+                            emergency_phone: formData.emergency_phone,
+                            work_phone: formData.work_phone
+                        };
+                        if (ownerId) customerPayload.owner_id = ownerId;
+
+                        const { data, error } = await supabase.from('customers').insert(customerPayload).select().single();
+                        if (error) throw error;
+                        customerId = data.id;
+                    }
+                } catch (err: any) {
+                    throw new Error(`Error Etapa 1 (Cliente): ${err.message || 'No se pudo resolver el cliente.'}`);
+                }
             }
 
-            // 2. Upsert All Vehicles sequentially
+            // ══════════════════════════════════════════════════════════════
+            // ETAPA 2: VEHÍCULOS — Upsert secuencial por patente
+            // ══════════════════════════════════════════════════════════════
             const allVehiclePlates: string[] = [];
-            const processedVehicles = [];
+            const processedVehicles: { id: string; price: number }[] = [];
 
             const activeTariff = allAbonoTariffs.find(t => t.name.toLowerCase().includes(finalType.toLowerCase()));
 
-            for (const vData of vehicles) {
-                const cleanedPlate = vData.patente.trim().toUpperCase();
-                allVehiclePlates.push(cleanedPlate);
+            try {
+                for (const vData of vehicles) {
+                    const cleanedPlate = vData.patente.trim().toUpperCase();
+                    allVehiclePlates.push(cleanedPlate);
 
-                const { data: existingVehicle } = await supabase
-                    .from('vehicles')
-                    .select('id')
-                    .eq('garage_id', garageId)
-                    .eq('plate', cleanedPlate)
-                    .maybeSingle();
+                    const { data: existingVehicle } = await supabase
+                        .from('vehicles')
+                        .select('id')
+                        .eq('garage_id', garageId)
+                        .eq('plate', cleanedPlate)
+                        .maybeSingle();
 
-                const vehiclePayload: any = {
-                    garage_id: garageId,
-                    customer_id: customerId,
-                    plate: cleanedPlate,
-                    type: vehicleTypes.find(v => v.id === vData.vehicleTypeId)?.name || 'Auto',
-                    brand: vData.marca,
-                    model: vData.modelo,
-                    color: vData.color,
-                    year: vData.year,
-                    insurance: vData.insurance,
-                    is_subscriber: true
-                };
-                if (ownerId) vehiclePayload.owner_id = ownerId;
+                    const vehiclePayload: any = {
+                        garage_id: garageId,
+                        customer_id: customerId,
+                        plate: cleanedPlate,
+                        type: vehicleTypes.find(v => v.id === vData.vehicleTypeId)?.name || 'Auto',
+                        brand: vData.marca,
+                        model: vData.modelo,
+                        color: vData.color,
+                        year: vData.year,
+                        insurance: vData.insurance,
+                        is_subscriber: true
+                    };
+                    if (ownerId) vehiclePayload.owner_id = ownerId;
 
-                let savedVehicleId = '';
-                if (existingVehicle) {
-                    const { data, error } = await supabase.from('vehicles').update(vehiclePayload).eq('id', existingVehicle.id).select().single();
-                    if (error) throw error;
-                    savedVehicleId = data.id;
-                } else {
-                    const { data, error } = await supabase.from('vehicles').insert(vehiclePayload).select().single();
-                    if (error) throw error;
-                    savedVehicleId = data.id;
+                    let savedVehicleId = '';
+                    if (existingVehicle) {
+                        const { data, error } = await supabase.from('vehicles').update(vehiclePayload).eq('id', existingVehicle.id).select().single();
+                        if (error) throw error;
+                        savedVehicleId = data.id;
+                    } else {
+                        const { data, error } = await supabase.from('vehicles').insert(vehiclePayload).select().single();
+                        if (error) throw error;
+                        savedVehicleId = data.id;
+                    }
+
+                    // Guardia: verificar que el ID se obtuvo correctamente
+                    if (!savedVehicleId) {
+                        throw new Error(`No se obtuvo ID para el vehículo con patente ${cleanedPlate}.`);
+                    }
+
+                    let vPrice = 0;
+                    if (activeTariff && vData.vehicleTypeId) {
+                        const priceRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === vData.vehicleTypeId && p.price_list === 'standard');
+                        vPrice = priceRecord ? Number(priceRecord.amount) : 0;
+                    }
+
+                    processedVehicles.push({ id: savedVehicleId, price: vPrice });
                 }
-
-                // Calculate its specific price for logic comparison
-                let vPrice = 0;
-                if (activeTariff && vData.vehicleTypeId) {
-                    const priceRecord = prices.find(p => p.tariff_id === activeTariff.id && p.vehicle_type_id === vData.vehicleTypeId && p.price_list === 'standard');
-                    vPrice = priceRecord ? Number(priceRecord.amount) : 0;
-                }
-
-                processedVehicles.push({ id: savedVehicleId, price: vPrice });
+            } catch (err: any) {
+                throw new Error(`Error Etapa 2 (Vehículo): ${err.message || 'No se pudo procesar un vehículo.'}`);
             }
 
-            // Find principal vehicle (the one that sets the price)
+            // Determinar vehículo principal (el de mayor precio)
             let mainVehicleId = processedVehicles[0].id;
             let currentMax = -1;
             for (const pv of processedVehicles) {
@@ -386,82 +435,121 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                 }
             }
 
-            // 3. Update/Insert Cochera
+            // ══════════════════════════════════════════════════════════════
+            // ETAPA 3: COCHERA — Validación de disponibilidad para Fija
+            // ══════════════════════════════════════════════════════════════
             let cocheraId: string;
-            const cocheraPayload: any = {
-                garage_id: garageId,
-                cliente_id: customerId,
-                tipo: finalType,
-                numero: finalType === 'Movil' ? `M-${allVehiclePlates[0]}` : formData.numeroCochera,
-                vehiculos: allVehiclePlates,
-                status: 'Ocupada',
-                precio_base: basePriceDisplay // Saving standard value as instructed
-            };
-            if (formData.piso) cocheraPayload.piso = formData.piso; // Guardamos el piso
 
-            if (finalType === 'Movil') {
-                // Always create new for Movil, maybe checking if one already mapping this plate exists
-                const { data, error } = await supabase.from('cocheras').insert(cocheraPayload).select().single();
-                if (error) throw error;
-                cocheraId = data.id;
-            } else {
-                // Fija/Exclusiva: Lookup by number
-                const { data: existingCochera } = await supabase
-                    .from('cocheras')
-                    .select('id')
-                    .eq('garage_id', garageId)
-                    .eq('numero', formData.numeroCochera)
-                    .maybeSingle();
+            try {
+                const cocheraPayload: any = {
+                    garage_id: garageId,
+                    cliente_id: customerId,
+                    tipo: finalType,
+                    numero: finalType === 'Movil' ? `M-${allVehiclePlates[0]}` : formData.numeroCochera,
+                    vehiculos: allVehiclePlates,
+                    status: 'Ocupada',
+                    precio_base: basePriceDisplay
+                };
+                if (formData.piso) cocheraPayload.piso = formData.piso;
 
-                if (existingCochera) {
-                    const { data, error } = await supabase.from('cocheras').update(cocheraPayload).eq('id', existingCochera.id).select().single();
-                    if (error) throw error;
-                    cocheraId = data.id;
-                } else {
+                if (finalType === 'Movil') {
                     const { data, error } = await supabase.from('cocheras').insert(cocheraPayload).select().single();
                     if (error) throw error;
                     cocheraId = data.id;
+                } else {
+                    // Fija / Exclusiva: verificar disponibilidad antes de asignar
+                    const { data: existingCochera } = await supabase
+                        .from('cocheras')
+                        .select('id, cliente_id')
+                        .eq('garage_id', garageId)
+                        .eq('numero', formData.numeroCochera)
+                        .maybeSingle();
+
+                    if (existingCochera) {
+                        // ── GUARDIA DE CONFLICTO: cochera ya asignada a otro cliente ──
+                        if (
+                            existingCochera.cliente_id &&
+                            existingCochera.cliente_id !== customerId
+                        ) {
+                            throw new Error(
+                                `La cochera ${finalType} N°${formData.numeroCochera} ya está asignada a otro cliente (ID: ${existingCochera.cliente_id}). Libérela manualmente antes de reasignarla.`
+                            );
+                        }
+                        // Cochera libre o del mismo cliente → actualizar
+                        const { data, error } = await supabase.from('cocheras').update(cocheraPayload).eq('id', existingCochera.id).select().single();
+                        if (error) throw error;
+                        cocheraId = data.id;
+                    } else {
+                        const { data, error } = await supabase.from('cocheras').insert(cocheraPayload).select().single();
+                        if (error) throw error;
+                        cocheraId = data.id;
+                    }
                 }
+            } catch (err: any) {
+                throw new Error(`Error Etapa 3 (Cochera): ${err.message || 'No se pudo procesar la cochera.'}`);
             }
 
-            // 4. Insert Subscription (With Prorated Price)
-            const now = new Date();
-            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+            // ══════════════════════════════════════════════════════════════
+            // ETAPA 4: ABONO — Guardia de integridad antes de insertar
+            // ══════════════════════════════════════════════════════════════
+            try {
+                // Guardia: verificar que IDs críticos son válidos
+                if (!customerId || !mainVehicleId) {
+                    throw new Error('IDs de cliente o vehículo inválidos. Operación cancelada para proteger la integridad de datos.');
+                }
 
-            const subPayload: any = {
-                garage_id: garageId,
-                customer_id: customerId,
-                vehicle_id: mainVehicleId, // Vincular al vehiculo principal
-                type: finalType,
-                price: proratedPrice,
-                start_date: now.toISOString(),
-                end_date: endOfMonth.toISOString(), // Standard expiry
-                active: true
-            };
-            if (ownerId) subPayload.owner_id = ownerId;
+                const now = new Date();
+                const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-            const { data: subData, error: subError } = await supabase.from('subscriptions').insert(subPayload).select().single();
-            if (subError) throw subError;
-
-            // 5. Insert Debt Optionally (NO movements created)
-            if (formData.initialDebtAmount > 0) {
-                const debtPayload = {
+                const subPayload: any = {
                     garage_id: garageId,
-                    subscription_id: subData.id,
                     customer_id: customerId,
-                    amount: formData.initialDebtAmount,
-                    status: 'PENDING',
-                    type: 'MANUAL_MIGRATION',
-                    due_date: now.toISOString(), // due_date to now()
-                    surcharge_applied: 0
+                    vehicle_id: mainVehicleId,
+                    type: finalType,
+                    price: proratedPrice,
+                    start_date: now.toISOString(),
+                    end_date: endOfMonth.toISOString(),
+                    active: true
                 };
-                const { error: debtError } = await supabase.from('debts').insert(debtPayload);
-                if (debtError) console.warn("Error creating debt:", debtError); // Non-blocking
+                if (ownerId) subPayload.owner_id = ownerId;
+
+                const { data: subData, error: subError } = await supabase.from('subscriptions').insert(subPayload).select().single();
+                if (subError) throw subError;
+
+                // Refuerzo: garantizar is_subscriber = true en todos los vehículos procesados
+                const vehicleIds = processedVehicles.map(pv => pv.id);
+                if (vehicleIds.length > 0) {
+                    const { error: flagError } = await supabase
+                        .from('vehicles')
+                        .update({ is_subscriber: true })
+                        .in('id', vehicleIds);
+                    if (flagError) console.warn('Advertencia: No se pudo confirmar is_subscriber en todos los vehículos:', flagError);
+                }
+
+                // 5. Deuda opcional (NO genera movimientos de caja)
+                if (formData.initialDebtAmount > 0) {
+                    const debtPayload = {
+                        garage_id: garageId,
+                        subscription_id: subData.id,
+                        customer_id: customerId,
+                        amount: formData.initialDebtAmount,
+                        status: 'PENDING',
+                        type: 'MANUAL_MIGRATION',
+                        due_date: now.toISOString(),
+                        surcharge_applied: 0
+                    };
+                    const { error: debtError } = await supabase.from('debts').insert(debtPayload);
+                    if (debtError) console.warn('Advertencia: No se pudo crear deuda importada:', debtError);
+                }
+            } catch (err: any) {
+                throw new Error(`Error Etapa 4 (Abono): ${err.message || 'No se pudo crear la suscripción.'}`);
             }
 
+            // ══════════════════════════════════════════════════════════════
+            // ÉXITO — Limpieza de estado
+            // ══════════════════════════════════════════════════════════════
             setFeedback({ type: 'success', text: 'Datos cargados exitosamente.' });
 
-            // Clear specific form states
             if (!isAddingToExisting) {
                 setFormData(prev => ({
                     ...prev,
@@ -491,10 +579,10 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
             }
 
         } catch (err: any) {
-            console.error("Migration Error:", err);
+            console.error('Migration Error:', err);
             setFeedback({ type: 'error', text: err.message || 'Error al procesar la carga de datos.' });
         } finally {
-            setLoading(false);
+            setIsSubmitting(false);
         }
     };
 
@@ -502,7 +590,7 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
     const labelClass = "text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-1.5 block ml-1";
 
     // Check if we can save
-    const isSaveDisabled = loading || !formData.dni
+    const isSaveDisabled = isSubmitting || !formData.dni
         || vehicles.some(v => !v.patente || !v.vehicleTypeId)
         || vehicles.some(v => v.vehicleTypeId && !isVehicleTypeValid(v.vehicleTypeId))
         || dniAlreadyExists;
@@ -853,15 +941,15 @@ export default function FormularioMigracion({ garageId, preloadedCustomer, onSuc
                                 onClick={handleSubmit}
                                 className={cn(
                                     "w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2",
-                                    loading && "opacity-80"
+                                    isSubmitting && "opacity-80"
                                 )}
                                 disabled={isSaveDisabled}
                             >
-                                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                                 {isAddingToExisting ? 'Añadir al Perfil' : 'Guardar Migración'}
                             </button>
 
-                            {isSaveDisabled && !loading && (
+                            {isSaveDisabled && !isSubmitting && (
                                 <div className="mt-4 flex gap-2 p-4 bg-red-50 rounded-xl border border-red-100">
                                     <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                                     <p className="text-[10px] text-red-600 font-bold uppercase tracking-wide leading-relaxed">

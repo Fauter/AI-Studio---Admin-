@@ -40,3 +40,22 @@
 .scrollbar-thin::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
 .scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
 .scrollbar-thin:hover::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+
+/* Dashboard Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideInFromBottom {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: slideInFromBottom 0.5s ease-out both;
+}
+.fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+.slide-in-from-bottom-2 {
+  animation: slideInFromBottom 0.5s ease-out both;
+}

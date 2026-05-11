@@ -354,6 +354,35 @@ export default function PriceManagement() {
     const sectionTariffs = tariffs.filter(t => t.type === type);
     if (sectionTariffs.length === 0) return null;
 
+    const sortedVehicles = React.useMemo(() => {
+      const vehiclesWithWeights = vehicles.map(v => {
+        let maxAmount = 0;
+        sectionTariffs.forEach(t => {
+          const p = prices.find(price => price.tariff_id === t.id && price.vehicle_type_id === v.id && price.price_list === selectedList);
+          if (p && p.amount > maxAmount) {
+            maxAmount = p.amount;
+          }
+        });
+        return { ...v, _hasPrices: maxAmount > 0, _maxAmount: maxAmount };
+      });
+
+      return vehiclesWithWeights.sort((a, b) => {
+        // Nivel 1: Presencia
+        if (a._hasPrices && !b._hasPrices) return -1;
+        if (!a._hasPrices && b._hasPrices) return 1;
+        
+        // Nivel 2: Valor Monetario (Menor a Mayor)
+        if (a._hasPrices && b._hasPrices) {
+          if (a._maxAmount !== b._maxAmount) {
+            return a._maxAmount - b._maxAmount;
+          }
+        }
+        
+        // Nivel 3: Vacíos o Empate -> sort_order / índice original
+        return vehicles.findIndex(v => v.id === a.id) - vehicles.findIndex(v => v.id === b.id);
+      });
+    }, [vehicles, sectionTariffs, prices, selectedList]);
+
     return (
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-8 animate-in fade-in slide-in-from-bottom-4">
         <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex items-center gap-3 backdrop-blur-sm">
@@ -367,10 +396,10 @@ export default function PriceManagement() {
             <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
               <tr>
                 <th className="px-6 py-4 font-bold tracking-wider w-1/3 text-slate-400">Concepto</th>
-                {vehicles.map(v => {
+                {sortedVehicles.map(v => {
                   const VIcon = VEHICLE_ICONS[v.icon_key as string] || Car;
                   return (
-                    <th key={v.id} className="px-4 py-3 font-bold text-center text-slate-700 min-w-[120px]">
+                    <th key={v.id} className={cn("px-4 py-3 font-bold text-center text-slate-700 min-w-[120px] transition-all duration-300", !v._hasPrices && "opacity-60 grayscale-[50%]")}>
                       <div className="flex flex-col items-center gap-1.5 group">
                         <div className={cn("p-1.5 rounded-md transition-colors group-hover:scale-110 flex items-center justify-center", getColorClasses(v.color_key || 'slate', false))}>
                           <VIcon size={20} strokeWidth={2.5} />
@@ -393,7 +422,7 @@ export default function PriceManagement() {
                       </div>
                     )}
                   </td>
-                  {vehicles.map((v) => {
+                  {sortedVehicles.map((v) => {
                     const cellKey = `${t.id}-${v.id}`;
                     const isSaving = savingCells.has(cellKey);
                     return (
@@ -469,13 +498,24 @@ export default function PriceManagement() {
 
     const deleteVehicle = async (id: string) => {
       const hasPrices = prices.some(p => p.vehicle_type_id === id && p.amount > 0);
-      if (hasPrices) {
-        alert("No se puede eliminar: existen precios activos para este vehículo.");
-        return;
-      }
-      if (confirm('¿Eliminar vehículo permanentemente?')) {
-        await supabase.from('vehicle_types').delete().eq('id', id);
-        if (garageId) fetchAllData(garageId);
+      
+      const confirmMsg = hasPrices 
+        ? "Este vehículo tiene precios configurados. Si lo eliminas, se borrarán todos sus precios asociados de forma permanente. ¿Continuar?"
+        : "¿Eliminar vehículo permanentemente?";
+
+      if (confirm(confirmMsg)) {
+        try {
+          const { error: pricesError } = await supabase.from('prices').delete().eq('vehicle_type_id', id);
+          if (pricesError) throw pricesError;
+
+          const { error: vehicleError } = await supabase.from('vehicle_types').delete().eq('id', id);
+          if (vehicleError) throw vehicleError;
+          
+          if (garageId) fetchAllData(garageId);
+        } catch (err: any) {
+          console.error('Error deleting vehicle:', err);
+          alert('Error al eliminar vehículo: ' + err.message);
+        }
       }
     };
 
