@@ -109,8 +109,10 @@ export default function PriceManagement() {
   // --- UI State ---
   const [selectedList, setSelectedList] = useState<PriceListType>('standard');
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
+  const [syncingCells, setSyncingCells] = useState<Set<string>>(new Set());
   const [isSavingGlobalConfig, setIsSavingGlobalConfig] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({});
+  const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({}); 
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const setStatus = useCallback((key: string, status: 'idle' | 'saving' | 'saved' | 'error', autoClearMs = 2000) => {
     setSaveStatus(prev => ({ ...prev, [key]: status }));
@@ -306,6 +308,87 @@ export default function PriceManagement() {
         return [...filtered, { ...payload, id: 'temp-' + Date.now() } as Price];
       });
 
+      // ── PROPAGATION: Sync cocheras & debts when editing 'standard' list ──
+      if (selectedList === 'standard') {
+        // Resolve names from local state (avoid extra queries)
+        const tariffObj = tariffs.find(t => t.id === tariffId);
+        const vehicleObj = vehicles.find(v => v.id === vehicleTypeId);
+
+        // Only propagate for 'abono' tariffs (subscription types)
+        if (tariffObj && vehicleObj && tariffObj.type === 'abono') {
+          console.log(`[Sync] Triggering propagation: tariff="${tariffObj.name}" (${tariffObj.type}), vehicle="${vehicleObj.name}", amount=${amount || 0}`);
+
+          // Transition cell to syncing state (orange indicator)
+          setSavingCells(prev => {
+            const next = new Set(prev);
+            next.delete(cellKey);
+            return next;
+          });
+          setSyncingCells(prev => new Set(prev).add(cellKey));
+
+          try {
+            const { data: rpcResult, error: rpcError } = await supabase.rpc('sync_prices_on_update', {
+              p_garage_id: garageId,
+              p_tariff_id: tariffId,
+              p_vehicle_type_id: vehicleTypeId,
+              p_new_amount: amount || 0,
+            });
+
+            if (rpcError) {
+              console.error('[Sync] RPC error:', rpcError);
+              setSyncToast({
+                type: 'error',
+                message: `Precio guardado, pero la sincronización falló: ${rpcError.message}`
+              });
+            } else {
+              const result = rpcResult as { success: boolean; cocheras_updated: number; debts_updated: number; error?: string };
+              console.log('[Sync] RPC result:', result);
+
+              if (result.success) {
+                const parts: string[] = [];
+                if (result.cocheras_updated > 0) parts.push(`${result.cocheras_updated} cochera(s)`);
+                if (result.debts_updated > 0) parts.push(`${result.debts_updated} deuda(s)`);
+
+                if (parts.length > 0) {
+                  setSyncToast({
+                    type: 'success',
+                    message: `Sincronizado: ${parts.join(' y ')} actualizadas.`
+                  });
+                } else {
+                  console.log('[Sync] No rows affected — no active cocheras/debts match this tariff+vehicle combination.');
+                  setSyncToast({
+                    type: 'info',
+                    message: 'Precio guardado. No hay cocheras o deudas pendientes que requieran actualización.'
+                  });
+                }
+              } else {
+                console.error('[Sync] RPC returned failure:', result.error);
+                setSyncToast({
+                  type: 'error',
+                  message: `Precio guardado, pero la propagación falló: ${result.error}`
+                });
+              }
+            }
+          } catch (syncErr: any) {
+            console.error('[Sync] Unexpected error:', syncErr);
+            setSyncToast({
+              type: 'error',
+              message: `Precio guardado en la matriz, pero falló la propagación a cocheras: ${syncErr.message}`
+            });
+          } finally {
+            setSyncingCells(prev => {
+              const next = new Set(prev);
+              next.delete(cellKey);
+              return next;
+            });
+          }
+
+          // Auto-clear toast after 5 seconds
+          setTimeout(() => setSyncToast(null), 5000);
+          return; // Skip the default finally block (already cleaned up)
+        }
+      }
+
     } catch (err: any) {
       console.error("Upsert failed:", err);
       // Alert user visually
@@ -425,6 +508,7 @@ export default function PriceManagement() {
                   {sortedVehicles.map((v) => {
                     const cellKey = `${t.id}-${v.id}`;
                     const isSaving = savingCells.has(cellKey);
+                    const isSyncing = syncingCells.has(cellKey);
                     return (
                       <td key={v.id} className="px-2 py-2">
                         <div className="relative">
@@ -437,13 +521,20 @@ export default function PriceManagement() {
                             onBlur={(e) => handlePriceUpsert(t.id, v.id, e.target.value)}
                             className={cn(
                               "no-spinner w-full pl-6 pr-3 py-2.5 text-right font-mono font-bold text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                              isSaving
-                                ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
-                                : "bg-transparent border-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-500 text-slate-700"
+                              isSyncing
+                                ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
+                                : isSaving
+                                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                                  : "bg-transparent border-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-500 text-slate-700"
                             )}
                             placeholder="-"
                           />
-                          {isSaving && (
+                          {isSyncing && (
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                              <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
+                            </div>
+                          )}
+                          {isSaving && !isSyncing && (
                             <div className="absolute right-2 top-1/2 -translate-y-1/2">
                               <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
                             </div>
@@ -1392,6 +1483,24 @@ export default function PriceManagement() {
           </div>
         )}
       </div>
+
+      {/* Sync Toast Banner */}
+      {syncToast && (
+        <div className={cn(
+          "mb-4 px-4 py-3 rounded-xl flex items-center gap-3 text-sm font-bold animate-in slide-in-from-top-2 shadow-sm border transition-all",
+          syncToast.type === 'success' && "bg-emerald-50 border-emerald-200 text-emerald-700",
+          syncToast.type === 'error' && "bg-red-50 border-red-200 text-red-700",
+          syncToast.type === 'info' && "bg-amber-50 border-amber-200 text-amber-700"
+        )}>
+          {syncToast.type === 'success' && <Check className="h-4 w-4 flex-shrink-0" />}
+          {syncToast.type === 'error' && <AlertCircle className="h-4 w-4 flex-shrink-0" />}
+          {syncToast.type === 'info' && <Info className="h-4 w-4 flex-shrink-0" />}
+          <span className="flex-1">{syncToast.message}</span>
+          <button onClick={() => setSyncToast(null)} className="p-1 hover:opacity-70 transition-opacity">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       <TabNavigator />
 

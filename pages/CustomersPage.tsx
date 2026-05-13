@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import {
     Users, Search, Loader2, AlertCircle, CheckCircle2,
     CreditCard, Car, History, User, Building2, Save, X, Phone, Mail, MapPin, Camera,
-    ShieldCheck, Contact2, FileText
+    ShieldCheck, Contact2, FileText, Truck, Bike, Bus, Van, Motorbike, type LucideIcon
 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
@@ -60,8 +60,58 @@ interface Vehicle {
     plate: string;
     brand: string | null;
     model: string | null;
+    type?: string | null;
     photos?: any;
 }
+
+interface VehicleTypeRecord {
+    id: string;
+    garage_id: string;
+    name: string;
+    icon_key: string;
+    color_key?: string;
+    sort_order: number;
+}
+
+// --- Vehicle Icon Mapping ---
+const VEHICLE_ICON_MAP: Record<string, LucideIcon> = {
+    bicycle: Bike,
+    motorcycle: Motorbike,
+    car: Car,
+    van: Van,
+    truck: Truck,
+    bus: Bus,
+};
+
+const getVehicleIcon = (iconKey?: string | null): LucideIcon => {
+    if (!iconKey) return Car;
+    return VEHICLE_ICON_MAP[iconKey.toLowerCase()] || Car;
+};
+
+// --- Dynamic Vehicle Color Styles ---
+const getVehicleColorStyles = (colorKey: string): string => {
+    switch (colorKey) {
+        case 'orange': return 'bg-orange-100 text-orange-600 border-orange-200';
+        case 'blue': return 'bg-blue-100 text-blue-600 border-blue-200';
+        case 'slate': return 'bg-slate-100 text-slate-600 border-slate-200';
+        case 'indigo': return 'bg-indigo-100 text-indigo-600 border-indigo-200';
+        case 'purple': return 'bg-purple-100 text-purple-600 border-purple-200';
+        case 'emerald': return 'bg-emerald-100 text-emerald-600 border-emerald-200';
+        case 'rose': return 'bg-rose-100 text-rose-600 border-rose-200';
+        default: return 'bg-slate-100 text-slate-600 border-slate-200';
+    }
+};
+
+// --- Smart Capitalization ---
+const smartCapitalize = (text: string): string => {
+    if (!text) return '';
+    // If text is all lowercase, convert to Capital Case
+    if (text === text.toLowerCase()) {
+        return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+    // If it already has uppercase chars (BMW, F100), leave intact
+    return text;
+};
 
 interface Subscription {
     id: string;
@@ -86,6 +136,7 @@ export default function CustomersPage() {
     const [cocheras, setCocheras] = useState<Cochera[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+    const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeRecord[]>([]);
 
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -109,13 +160,15 @@ export default function CustomersPage() {
                     debtsRes,
                     cocherasRes,
                     vehiclesRes,
-                    subsRes
+                    subsRes,
+                    vehicleTypesRes
                 ] = await Promise.all([
                     supabase.from('customers').select('*').eq('garage_id', garageId),
                     supabase.from('debts').select('*').eq('garage_id', garageId).eq('status', 'PENDING'),
                     supabase.from('cocheras').select('*').eq('garage_id', garageId),
                     supabase.from('vehicles').select('*').eq('garage_id', garageId),
                     supabase.from('suscriptions').select('id, customer_id, vehicle_id, start_date, end_date, price, active, documents_metadata').eq('garage_id', garageId),
+                    supabase.from('vehicle_types').select('*').eq('garage_id', garageId),
                 ]);
 
                 if (customersRes.error) throw customersRes.error;
@@ -125,6 +178,7 @@ export default function CustomersPage() {
                 setCocheras(cocherasRes.data as Cochera[] || []);
                 setVehicles(vehiclesRes.data as Vehicle[] || []);
                 setSubscriptions(subsRes.data as Subscription[] || []);
+                setVehicleTypes(vehicleTypesRes.data as VehicleTypeRecord[] || []);
 
             } catch (err: any) {
                 console.error("Error fetching customers data:", err);
@@ -148,17 +202,47 @@ export default function CustomersPage() {
 
     // Enriched Customer Data (for the table)
     const customersWithStats = useMemo(() => {
-        return filteredCustomers.map(customer => {
-            const customerDebts = debts.filter(d => d.customer_id === customer.id && d.status === 'PENDING');
-            const totalDebt = customerDebts.reduce((sum, d) => sum + getRemaining(d), 0);
+        const enriched = filteredCustomers.map(customer => {
             const customerCocheras = cocheras.filter(c => c.cliente_id === customer.id);
+            const cocherasCount = customerCocheras.length;
+
+            // Cálculo de Deuda Real: Solo suma deuda si tiene cocheras asignadas.
+            let totalDebt = 0;
+            if (cocherasCount > 0) {
+                const customerDebts = debts.filter(d => d.customer_id === customer.id && d.status === 'PENDING');
+                totalDebt = customerDebts.reduce((sum, d) => sum + getRemaining(d), 0);
+            }
 
             return {
                 ...customer,
                 totalDebt,
-                cocherasCount: customerCocheras.length,
+                cocherasCount,
                 cocherasInfo: customerCocheras.map(c => c.numero || c.name).join(', ')
             };
+        });
+
+        // Ordenamiento Inteligente
+        return enriched.sort((a, b) => {
+            const aHasCocheras = a.cocherasCount > 0;
+            const bHasCocheras = b.cocherasCount > 0;
+
+            // 3. Al final de todo: Clientes sin cocheras
+            if (aHasCocheras && !bHasCocheras) return -1;
+            if (!aHasCocheras && bHasCocheras) return 1;
+            if (!aHasCocheras && !bHasCocheras) return 0;
+
+            const aHasDebt = a.totalDebt > 0;
+            const bHasDebt = b.totalDebt > 0;
+
+            // 1. Primero: Clientes con cocheras asignadas Y deuda (mayor deuda arriba)
+            if (aHasDebt && !bHasDebt) return -1;
+            if (!aHasDebt && bHasDebt) return 1;
+            if (aHasDebt && bHasDebt) {
+                return b.totalDebt - a.totalDebt;
+            }
+
+            // 2. Segundo: Clientes con cocheras asignadas SIN deuda (ordenados por nombre)
+            return (a.name || '').localeCompare(b.name || '');
         });
     }, [filteredCustomers, debts, cocheras]);
 
@@ -377,6 +461,10 @@ export default function CustomersPage() {
                                             {customer.totalDebt > 0 ? (
                                                 <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-200">
                                                     ${customer.totalDebt.toLocaleString()}
+                                                </span>
+                                            ) : customer.cocherasCount === 0 ? (
+                                                <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+                                                    Inactivo
                                                 </span>
                                             ) : (
                                                 <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100">
@@ -668,47 +756,67 @@ export default function CustomersPage() {
 
                                     {selectedCocheras.length > 0 ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            {selectedCocheras.map(cochera => (
+                                            {selectedCocheras.map(cochera => {
+                                                const hasCocheraDebt = cochera.totalCocheraDebt > 0;
+
+                                                return (
                                                 <div key={cochera.id} className={cn(
-                                                    "bg-white rounded-2xl border shadow-sm p-5 transition-colors",
-                                                    cochera.isVencida ? "border-red-200" : "border-slate-200 hover:border-indigo-300"
+                                                    "rounded-2xl border p-5 transition-all",
+                                                    (cochera.isVencida || hasCocheraDebt)
+                                                        ? "bg-red-50/40 border-red-100 shadow-[0_2px_10px_-3px_rgba(239,68,68,0.15)]"
+                                                        : "bg-white border-slate-200 shadow-sm hover:border-indigo-300"
                                                 )}>
-                                                    <div className="flex justify-between items-start mb-4">
+                                                    {/* Cochera Header */}
+                                                    <div className="flex justify-between items-start mb-3">
                                                         <div className="flex items-center gap-3">
                                                             <div className={cn(
                                                                 "p-2.5 rounded-xl",
-                                                                cochera.isVencida ? "bg-red-50 text-red-600" : "bg-indigo-50 text-indigo-600"
+                                                                (cochera.isVencida || hasCocheraDebt) ? "bg-red-100 text-red-600" : "bg-indigo-50 text-indigo-600"
                                                             )}>
                                                                 <Building2 className="h-5 w-5" />
                                                             </div>
                                                             <div className="flex flex-col">
-                                                                {/* <p className={cn("font-black text-lg flex items-center gap-2 flex-wrap", cochera.isVencida ? "text-red-700" : "text-slate-800")}>
-                                                                    {cochera.numero || cochera.name || 'S/N'}
-                                                                    {cochera.isVencida ? (
-                                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-500 bg-red-100 px-1.5 py-0.5 rounded">Vencida</span>
-                                                                    ) : (
-                                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Vigente</span>
+                                                                <p className={cn("font-black text-lg flex items-center gap-2 flex-wrap", (cochera.isVencida || hasCocheraDebt) ? "text-red-700" : "text-slate-800")}>
+                                                                    #{cochera.numero || cochera.name || 'S/N'}
+                                                                    {hasCocheraDebt && (
+                                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded">
+                                                                            <AlertCircle className="h-3 w-3" /> DEBE {cochera.owedMonths?.length || '?'} MESES
+                                                                        </span>
                                                                     )}
                                                                 </p>
-                                                                {cochera.totalCocheraDebt > 0 && (
-                                                                    <span className="text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded w-fit mt-1">
-                                                                        Saldo Pendiente: ${cochera.totalCocheraDebt.toLocaleString()}
-                                                                    </span>
-                                                                )}
-                                                                {cochera.owedMonths && cochera.owedMonths.length > 0 && (
-                                                                    <span className="text-[10px] font-medium text-red-500 mt-0.5">
-                                                                        Debe {cochera.owedMonths.length} mes(es): {cochera.owedMonths.join(', ')}
-                                                                    </span>
-                                                                )} */}
                                                                 <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit mt-1">
                                                                     Tipo: {cochera.tipo || 'Standard'}
                                                                 </span>
                                                             </div>
                                                         </div>
-                                                        <p className="text-slate-400 font-bold text-sm bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                                                            ${cochera.precio_base?.toLocaleString() || 0}
-                                                        </p>
+                                                        {/* Precio base / Deuda */}
+                                                        <div className="text-right flex flex-col items-end gap-1">
+                                                            {hasCocheraDebt ? (
+                                                                <>
+                                                                    <p className="text-slate-400 text-xs line-through">
+                                                                        ${cochera.precio_base?.toLocaleString() || 0}/mes
+                                                                    </p>
+                                                                    <p className="font-black text-sm text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
+                                                                        ${cochera.totalCocheraDebt.toLocaleString()}
+                                                                    </p>
+                                                                </>
+                                                            ) : (
+                                                                <p className="text-slate-400 font-bold text-sm bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                                                                    ${cochera.precio_base?.toLocaleString() || 0}
+                                                                </p>
+                                                            )}
+                                                        </div>
                                                     </div>
+
+                                                    {/* Meses adeudados detalle */}
+                                                    {cochera.owedMonths && cochera.owedMonths.length > 0 && (
+                                                        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-100 rounded-xl">
+                                                            <p className="text-[10px] font-bold uppercase text-red-500 mb-1">Meses Adeudados</p>
+                                                            <p className="text-xs font-semibold text-red-700">
+                                                                {cochera.owedMonths.join(', ')}
+                                                            </p>
+                                                        </div>
+                                                    )}
 
                                                     {/* CRUCE: VEHÍCULOS AUTORIZADOS */}
                                                     <div className="mt-4 pt-4 border-t border-slate-100">
@@ -725,15 +833,39 @@ export default function CustomersPage() {
                                                                     const dniUrl = parsedPhotos?.dni;
                                                                     const cedulaUrl = parsedPhotos?.cedula;
 
+                                                                    // Resolve vehicle type icon & color from vehicle_types table
+                                                                    const matchedType = vehicleTypes.find(vt => vt.name?.toLowerCase() === vehicle.type?.toLowerCase());
+                                                                    const VehicleIcon = getVehicleIcon(matchedType?.icon_key);
+                                                                    const vehicleColorKey = matchedType?.color_key || 'slate';
+                                                                    const vehicleTypeName = vehicle.type ? smartCapitalize(vehicle.type) : null;
+
+                                                                    // Build secondary line: Brand Model (filter nulls)
+                                                                    const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
+
                                                                     return (
                                                                         <div key={vehicle.id} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
-                                                                            <div className="flex items-center gap-3">
-                                                                                <Car className="h-4 w-4 text-indigo-500 shrink-0" />
-                                                                                <p className="font-bold text-slate-800 text-sm">{vehicle.plate}</p>
-                                                                                <span className="text-xs text-slate-300">•</span>
-                                                                                <p className="text-xs text-slate-500 truncate">{vehicle.brand} {vehicle.model}</p>
+                                                                            <div className="flex items-center gap-3 min-w-0">
+                                                                                {/* Icon with system color */}
+                                                                                <div className={cn("p-1.5 rounded-lg border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
+                                                                                    <VehicleIcon className="h-4 w-4" />
+                                                                                </div>
+                                                                                <div className="min-w-0">
+                                                                                    {/* Primary line: Patente + Type */}
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{vehicle.plate}</p>
+                                                                                        {vehicleTypeName && (
+                                                                                            <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
+                                                                                                {vehicleTypeName}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {/* Secondary line: Brand Model */}
+                                                                                    {brandModel && (
+                                                                                        <p className="text-[11px] text-slate-400 mt-0.5 truncate">{brandModel}</p>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
-                                                                            <div className="flex items-center gap-1">
+                                                                            <div className="flex items-center gap-1 shrink-0">
                                                                                 <button
                                                                                     type="button"
                                                                                     disabled={!seguroUrl}
@@ -786,7 +918,8 @@ export default function CustomersPage() {
                                                         )}
                                                     </div>
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-12 text-center flex flex-col items-center">
