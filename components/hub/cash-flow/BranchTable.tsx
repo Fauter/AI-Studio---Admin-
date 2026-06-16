@@ -1,5 +1,5 @@
-import React from 'react';
-import { GitBranch, Building2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { GitBranch, Building2, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn, formatCurrency } from './CashFlowShared';
 
 interface BranchBreakdown {
@@ -13,13 +13,21 @@ interface BranchBreakdown {
     spots: number;
     occupied: number;
     activeSubs: number;
+    // Expense fields
+    monthlyExpenses: number;
+    expenseCount: number;
+    monthlyRevenue: number;
 }
 
 interface BranchTableProps {
     branchBreakdown: BranchBreakdown[];
 }
 
+
 export default function BranchTable({ branchBreakdown }: BranchTableProps) {
+    const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
+    const toggleBranch = (id: string) => setExpandedBranches(prev => ({ ...prev, [id]: !prev[id] }));
+
     return (
         <div className="animate-in fade-in duration-300 bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
             <div className="px-5 pt-5 pb-3 flex items-center gap-2.5 border-b border-slate-100">
@@ -48,35 +56,83 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
                                 <div className="flex flex-col items-center gap-2"><Building2 className="h-8 w-8 opacity-20" /><p>No hay sucursales configuradas.</p></div>
                             </td></tr>
                         ) : (
-                            branchBreakdown.map(branch => (
-                                <tr key={branch.id} className="hover:bg-indigo-50/40 transition-colors cursor-default">
-                                    <td className="px-5 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center"><Building2 className="h-4 w-4" /></div>
-                                            <div>
-                                                <p className="font-semibold text-slate-800 text-sm">{branch.name}</p>
-                                                <p className="text-[10px] text-slate-400">{branch.occupied}/{branch.spots} cocheras</p>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-4 text-right font-mono font-bold text-slate-700">{formatCurrency(branch.effectivo)}</td>
-                                    <td className="px-5 py-4 text-right font-mono font-bold text-slate-700">{formatCurrency(branch.digital)}</td>
-                                    <td className="px-5 py-4 text-right font-mono font-bold text-slate-800">{formatCurrency(branch.total)}</td>
-                                    <td className="px-5 py-4 text-center">
-                                        <div className="inline-flex items-center gap-2">
-                                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                                <div className={cn("h-full rounded-full transition-all", branch.occupancy > 85 ? "bg-red-500" : branch.occupancy > 60 ? "bg-amber-500" : "bg-indigo-500")}
-                                                    style={{ width: `${Math.min(branch.occupancy, 100)}%` }} />
-                                            </div>
-                                            <span className="text-xs font-bold font-mono text-slate-600">{branch.occupancy}%</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-4 text-center font-mono font-bold text-violet-600">{branch.activeSubs}</td>
-                                    <td className="px-5 py-4 text-right">
-                                        <span className={cn("font-mono font-bold text-sm", branch.deuda > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(branch.deuda)}</span>
-                                    </td>
-                                </tr>
-                            ))
+                            branchBreakdown.map(branch => {
+                                const isExpanded = !!expandedBranches[branch.id];
+                                const margin = branch.monthlyRevenue - branch.monthlyExpenses;
+                                const hasExpenses = branch.monthlyExpenses > 0;
+
+                                return (
+                                    <React.Fragment key={branch.id}>
+                                        {/* ── Main data row (unchanged) ── */}
+                                        <tr className="hover:bg-indigo-50/40 transition-colors cursor-default">
+                                            <td className="px-5 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center"><Building2 className="h-4 w-4" /></div>
+                                                    <div>
+                                                        <p className="font-semibold text-slate-800 text-sm">{branch.name}</p>
+                                                        <p className="text-[10px] text-slate-400">{branch.occupied}/{branch.spots} cocheras</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-4 text-right font-mono font-bold text-slate-700">{formatCurrency(branch.effectivo)}</td>
+                                            <td className="px-5 py-4 text-right font-mono font-bold text-slate-700">{formatCurrency(branch.digital)}</td>
+                                            <td className="px-5 py-4 text-right font-mono font-bold text-slate-800">{formatCurrency(branch.total)}</td>
+                                            <td className="px-5 py-4 text-center">
+                                                <div className="inline-flex items-center gap-2">
+                                                    <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                                        <div className={cn("h-full rounded-full transition-all", branch.occupancy > 85 ? "bg-red-500" : branch.occupancy > 60 ? "bg-amber-500" : "bg-indigo-500")}
+                                                            style={{ width: `${Math.min(branch.occupancy, 100)}%` }} />
+                                                    </div>
+                                                    <span className="text-xs font-bold font-mono text-slate-600">{branch.occupancy}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-4 text-center font-mono font-bold text-violet-600">{branch.activeSubs}</td>
+                                            <td className="px-5 py-4 text-right">
+                                                <span className={cn("font-mono font-bold text-sm", branch.deuda > 0 ? "text-amber-600" : "text-slate-400")}>{formatCurrency(branch.deuda)}</span>
+                                            </td>
+                                        </tr>
+
+                                        {/* ── Expense summary row (always visible when expenses exist) ── */}
+                                        {hasExpenses && (
+                                            <tr className="bg-slate-50/60 border-b border-slate-100">
+                                                <td colSpan={7} className="px-5 py-1.5">
+                                                    <div className="flex items-center justify-between">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleBranch(branch.id)}
+                                                            className="flex items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-800 transition-colors"
+                                                        >
+                                                            {isExpanded
+                                                                ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                                                                : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                                                            }
+                                                            <span>
+                                                                Egresos Mes: <span className="font-semibold font-mono">{formatCurrency(branch.monthlyExpenses)}</span>
+                                                                {' '}<span className="text-slate-400">({branch.expenseCount} gastos)</span>
+                                                            </span>
+                                                        </button>
+                                                        <span className={cn(
+                                                            "text-[11px] font-semibold font-mono",
+                                                            margin >= 0 ? "text-emerald-600" : "text-red-600"
+                                                        )}>
+                                                            Margen: {formatCurrency(margin)}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+
+                                        {/* ── Expanded details ── */}
+                                        {hasExpenses && isExpanded && (
+                                            <tr className="bg-slate-50/30 border-b border-slate-100">
+                                                <td colSpan={7} className="px-5 py-4 text-center text-xs text-slate-500">
+                                                    Se registraron <span className="font-semibold text-slate-700">{branch.expenseCount}</span> egresos este mes totalizando <span className="font-mono font-semibold text-slate-700">{formatCurrency(branch.monthlyExpenses)}</span>.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })
                         )}
                         {branchBreakdown.length > 1 && (
                             <tr className="bg-slate-50/80 font-bold border-t border-slate-200">

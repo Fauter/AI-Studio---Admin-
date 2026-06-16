@@ -29,7 +29,9 @@ import {
   X,
   Van,
   Users,
-  Check
+  Check,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -466,6 +468,39 @@ export default function PriceManagement() {
       });
     }, [vehicles, sectionTariffs, prices, selectedList]);
 
+    const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+    const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+    const [canScrollRight, setCanScrollRight] = React.useState(false);
+    const [hasOverflow, setHasOverflow] = React.useState(false);
+
+    const checkScroll = React.useCallback(() => {
+      if (scrollContainerRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
+        setCanScrollLeft(scrollLeft > 0);
+        setCanScrollRight(Math.ceil(scrollLeft + clientWidth) < scrollWidth);
+        setHasOverflow(scrollWidth > clientWidth);
+      }
+    }, []);
+
+    React.useEffect(() => {
+      const timer = setTimeout(checkScroll, 50);
+      window.addEventListener('resize', checkScroll);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', checkScroll);
+      };
+    }, [checkScroll, sortedVehicles]);
+
+    const scroll = (direction: 'left' | 'right') => {
+      if (scrollContainerRef.current) {
+        const amount = 300;
+        scrollContainerRef.current.scrollBy({
+          left: direction === 'left' ? -amount : amount,
+          behavior: 'smooth'
+        });
+      }
+    };
+
     return (
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-8 animate-in fade-in slide-in-from-bottom-4">
         <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex items-center gap-3 backdrop-blur-sm">
@@ -474,9 +509,32 @@ export default function PriceManagement() {
           </div>
           <h3 className="font-bold text-slate-800 text-lg tracking-tight">{title}</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
+        <div className="relative group/matrix">
+          {hasOverflow && canScrollLeft && (
+            <button
+              type="button"
+              onClick={() => scroll('left')}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/95 hover:bg-white shadow-[2px_0_10px_rgba(0,0,0,0.1)] border border-slate-200 rounded-r-lg p-2 transition-all text-slate-500 hover:text-indigo-600 focus:outline-none"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          )}
+          {hasOverflow && canScrollRight && (
+            <button
+              type="button"
+              onClick={() => scroll('right')}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/95 hover:bg-white shadow-[-2px_0_10px_rgba(0,0,0,0.1)] border border-slate-200 rounded-l-lg p-2 transition-all text-slate-500 hover:text-indigo-600 focus:outline-none"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          )}
+          <div 
+            ref={scrollContainerRef}
+            onScroll={checkScroll}
+            className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent"
+          >
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
               <tr>
                 <th className="px-6 py-4 font-bold tracking-wider w-1/3 text-slate-400">Concepto</th>
                 {sortedVehicles.map(v => {
@@ -546,7 +604,8 @@ export default function PriceManagement() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </div>
     );

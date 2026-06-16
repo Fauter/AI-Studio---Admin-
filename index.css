@@ -9,6 +9,7 @@
 }
 
 @layer utilities {
+
   /* Hide numeric spinners in Chrome, Safari, Edge, Opera */
   .no-spinner::-webkit-outer-spin-button,
   .no-spinner::-webkit-inner-spin-button {
@@ -27,35 +28,136 @@
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   @apply bg-slate-300 rounded-full hover:bg-slate-400;
 }
 
 /* Dashboard table thin scrollbar — invisible until hover */
-.scrollbar-thin::-webkit-scrollbar { width: 5px; }
-.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
-.scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
-.scrollbar-thin:hover::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+}
+
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+}
+
+.scrollbar-thin:hover::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
 
 /* Dashboard Animations */
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
+
 @keyframes slideInFromBottom {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 .animate-in {
   animation: slideInFromBottom 0.5s ease-out both;
 }
+
 .fade-in {
   animation: fadeIn 0.4s ease-out both;
 }
+
 .slide-in-from-bottom-2 {
   animation: slideInFromBottom 0.5s ease-out both;
+}
+
+/* ─── Print Styles ─────────────────────────────────────────────────── */
+@media print {
+  /* Reset page */
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10pt !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide everything except print area */
+  .print-hidden,
+  aside,
+  header,
+  nav,
+  .scrollbar-thin::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print-visible {
+    display: block !important;
+  }
+
+  /* Print table styling — minimal ink */
+  .print-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9pt !important;
+  }
+
+  .print-table th {
+    background: #f1f5f9 !important;
+    border-bottom: 2px solid #334155 !important;
+    padding: 4px 6px !important;
+    text-align: left !important;
+    font-weight: 700 !important;
+    font-size: 8pt !important;
+    text-transform: uppercase !important;
+    color: #334155 !important;
+  }
+
+  .print-table td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 3px 6px !important;
+    color: #1e293b !important;
+    font-size: 8.5pt !important;
+  }
+
+  .print-table tr:nth-child(even) td {
+    background: #f8fafc !important;
+  }
+
+  /* Remove shadows, rounded corners, animations */
+  * {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    animation: none !important;
+    transition: none !important;
+  }
 }

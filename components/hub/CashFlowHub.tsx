@@ -17,16 +17,21 @@ import {
     Stay,
     Subscription,
     Debt,
-    Cochera
+    Cochera,
+    Expense,
+    ExpenseTemplate,
+    UnifiedTransaction
 } from './cash-flow/CashFlowShared';
 import KpiGrid from './cash-flow/KpiGrid';
 import ChartsSection from './cash-flow/ChartsSection';
 import BranchTable from './cash-flow/BranchTable';
 import MovementsTable from './cash-flow/MovementsTable';
+import ExpensesSection from './cash-flow/ExpensesSection';
 import HistoryModal from './cash-flow/modals/HistoryModal';
 import DebtModal from './cash-flow/modals/DebtModal';
 import EficaciaModal from './cash-flow/modals/EficaciaModal';
 import DailyIncomeModal from './cash-flow/modals/DailyIncomeModal';
+import OccupancyModal from './cash-flow/modals/OccupancyModal';
 
 export type PeakMode = 'occupancy' | 'entries' | 'exits';
 
@@ -58,6 +63,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const [debts, setDebts] = useState<Debt[]>([]);
     const [cocheras, setCocheras] = useState<Cochera[]>([]);
     const [buildingLevels, setBuildingLevels] = useState<BuildingLevel[]>([]);
+    const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [expenseTemplates, setExpenseTemplates] = useState<ExpenseTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingProgress, setLoadingProgress] = useState(0);
     const [loadingStep, setLoadingStep] = useState('Iniciando...');
@@ -69,6 +76,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
     const [isEficaciaModalOpen, setIsEficaciaModalOpen] = useState(false);
     const [isDailyIncomeModalOpen, setIsDailyIncomeModalOpen] = useState(false);
+    const [isOccupancyModalOpen, setIsOccupancyModalOpen] = useState(false);
     const [eficaciaMonthOffset, setEficaciaMonthOffset] = useState(0);
     const [dailyIncomeMonthOffset, setDailyIncomeMonthOffset] = useState(0);
 
@@ -143,6 +151,27 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 setVehicles(vehiclesData || []);
                 setStays((activeStaysData || []) as Stay[]);
                 setAllStays((allStaysData || []) as Stay[]);
+
+                // Etapa 4.5: Egresos
+                setLoadingStep('Cargando egresos...');
+
+                const expensesData = await retry(() => supabase
+                    .from('expenses')
+                    .select('id, garage_id, owner_id, template_id, description, amount, expense_type, expense_date, created_at, created_by')
+                    .in('garage_id', garageIds)
+                    .gte('expense_date', movementsSince)
+                    .order('expense_date', { ascending: false })
+                );
+
+                const templatesData = await retry(() => supabase
+                    .from('expense_templates')
+                    .select('*')
+                    .in('garage_id', garageIds)
+                    .eq('is_active', true)
+                );
+
+                setExpenses((expensesData || []) as Expense[]);
+                setExpenseTemplates((templatesData || []) as ExpenseTemplate[]);
 
                 // Etapa 5 (100%): Movements Paginados
                 setLoadingProgress(100);
@@ -234,6 +263,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const gVehicles = useMemo(() => selectedGarageId === 'all' ? vehicles : vehicles.filter(v => v.garage_id === selectedGarageId), [vehicles, selectedGarageId]);
     const gCocheras = useMemo(() => selectedGarageId === 'all' ? cocheras : cocheras.filter(c => c.garage_id === selectedGarageId), [cocheras, selectedGarageId]);
     const gLevels = useMemo(() => selectedGarageId === 'all' ? buildingLevels : buildingLevels.filter(l => l.garage_id === selectedGarageId), [buildingLevels, selectedGarageId]);
+    const gExpenses = useMemo(() => selectedGarageId === 'all' ? expenses : expenses.filter(e => e.garage_id === selectedGarageId), [expenses, selectedGarageId]);
 
     // §4d. KPIs
     const kpiIngresos = useMemo(() => {
@@ -701,6 +731,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         const { inicioHoy, inicioManana } = getArgentinaDateAnchors();
         const hoyMs = inicioHoy.getTime();
         const mananaMs = inicioManana.getTime();
+        const inicioMes = new Date(inicioHoy.getFullYear(), inicioHoy.getMonth(), 1, 0, 0, 0, 0).getTime();
         return garages.map(g => {
             const gMoves = movements.filter(m => m.garage_id === g.id);
             const todayMoves = gMoves.filter(m => {
@@ -721,9 +752,24 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 .filter(d => d.garage_id === g.id && d.customer_id && clientesConCochera.has(d.customer_id))
                 .reduce((a, d) => a + Number(d.remaining_amount ?? 0), 0);
             const activeSubs = vehicles.filter(v => v.garage_id === g.id && v.is_subscriber === true).length;
-            return { id: g.id, name: g.name || 'Sin Nombre', effectivo, digital, total: todayTotal, occupancy, deuda, spots, occupied, activeSubs };
+
+            // ── Egresos mensuales por sucursal ──
+            const garageExpenses = expenses.filter(e => {
+                if (e.garage_id !== g.id) return false;
+                const ts = new Date(e.expense_date).getTime();
+                return ts >= inicioMes && ts < mananaMs;
+            });
+            const monthlyExpenses = garageExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);
+            const monthlyRevenue = gMoves
+                .filter(m => { if (!m.timestamp) return false; return new Date(m.timestamp).getTime() >= inicioMes; })
+                .reduce((a, m) => a + Number(m.amount || 0), 0);
+            return {
+                id: g.id, name: g.name || 'Sin Nombre', effectivo, digital, total: todayTotal,
+                occupancy, deuda, spots, occupied, activeSubs,
+                monthlyExpenses, expenseCount: garageExpenses.length, monthlyRevenue
+            };
         });
-    }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera]);
+    }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera, expenses]);
 
     // §4f. Filtered Movements
     const filteredMovements = useMemo(() => {
@@ -754,6 +800,49 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     const totalCaja = useMemo(() => filteredMovements.reduce((acc, m) => acc + Number(m.amount || 0), 0), [filteredMovements]);
 
+    // §4g. Unified Transactions — merge movements + expenses for Registro de Actividad
+    const unifiedTransactions = useMemo<UnifiedTransaction[]>(() => {
+        const movementTxns: UnifiedTransaction[] = filteredMovements.map(m => ({
+            id: m.id,
+            source: 'movement' as const,
+            garage_id: m.garage_id,
+            timestamp: m.timestamp,
+            amount: Number(m.amount ?? 0),
+            description: m.notes || '---',
+            plate: m.plate || null,
+            type: m.type,
+            payment_method: m.payment_method || null,
+            operator: m.operator || null,
+            related_entity_id: m.related_entity_id,
+            ticket_number: m.ticket_number,
+            invoice_type: m.invoice_type,
+            vehicle_type: m.vehicle_type,
+        }));
+
+        const expenseTxns: UnifiedTransaction[] = gExpenses.map(e => ({
+            id: e.id,
+            source: 'expense' as const,
+            garage_id: e.garage_id,
+            timestamp: e.expense_date,
+            amount: Number(e.amount ?? 0),
+            description: e.description,
+            plate: null,
+            type: 'EGRESO',
+            payment_method: '---',
+            operator: e.created_by || null,
+            expense_type: e.expense_type,
+        }));
+
+        return [...movementTxns, ...expenseTxns]
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }, [filteredMovements, gExpenses]);
+
+    const totalCajaUnified = useMemo(() => {
+        const ingresos = filteredMovements.reduce((acc, m) => acc + Number(m.amount || 0), 0);
+        const egresos = gExpenses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+        return ingresos - egresos;
+    }, [filteredMovements, gExpenses]);
+
     // Functions removed, logic is preserved
 
 
@@ -763,6 +852,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         { key: 'resumen', label: 'Resumen General', icon: Activity },
         { key: 'sucursal', label: 'Análisis por Sucursal', icon: GitBranch },
         { key: 'registro', label: 'Registro de Actividad', icon: List },
+        { key: 'egresos', label: 'Egresos', icon: BadgeDollarSign },
     ];
 
     /** Garage filter — rendered inline where needed */
@@ -806,44 +896,46 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     return (
         <>
-            <div className="space-y-5">
-                {/* HEADER */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-500/20">
-                            <Activity className="h-5 w-5 text-white" />
+            <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-2">
+                    {/* HEADER */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-500/20">
+                                <Activity className="h-5 w-5 text-white" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800 tracking-tight">Centro Financiero</h2>
+                                <p className="text-xs text-slate-500">Terminal de inteligencia operativa</p>
+                            </div>
                         </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Centro Financiero</h2>
-                            <p className="text-xs text-slate-500">Terminal de inteligencia operativa</p>
+                        <div className="flex items-center gap-3">
+                            <OperationClock />
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <OperationClock />
-                    </div>
-                </div>
 
-                {/* SUB-NAVBAR — Minimalist underline style */}
-                <div className="flex items-center justify-between border-b border-slate-200">
-                    <div className="flex items-center gap-1">
-                        {sections.map(s => {
-                            const Icon = s.icon;
-                            const isActive = activeSection === s.key;
-                            return (
-                                <button key={s.key} onClick={() => setActiveSection(s.key)}
-                                    className={cn("flex items-center gap-2 px-4 py-3 text-xs font-semibold border-b-2 transition-all -mb-px",
-                                        isActive ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300")}>
-                                    <Icon className="h-3.5 w-3.5" />
-                                    <span className="hidden md:inline">{s.label}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                    {activeSection === 'resumen' && (
-                        <div className="pb-2">
-                            <GarageFilter />
+                    {/* SUB-NAVBAR — Minimalist underline style */}
+                    <div className="flex items-center justify-between border-b border-slate-200">
+                        <div className="flex items-center gap-1">
+                            {sections.map(s => {
+                                const Icon = s.icon;
+                                const isActive = activeSection === s.key;
+                                return (
+                                    <button key={s.key} onClick={() => setActiveSection(s.key)}
+                                        className={cn("flex items-center gap-2 px-4 py-3 text-xs font-semibold border-b-2 transition-all -mb-px",
+                                            isActive ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300")}>
+                                        <Icon className="h-3.5 w-3.5" />
+                                        <span className="hidden md:inline">{s.label}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
-                    )}
+                        {activeSection === 'resumen' && (
+                            <div className="pb-2">
+                                <GarageFilter />
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* ══ RESUMEN GENERAL ══ */}
@@ -860,6 +952,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                             setIsDebtModalOpen={setIsDebtModalOpen}
                             setIsEficaciaModalOpen={setIsEficaciaModalOpen}
                             setIsDailyIncomeModalOpen={setIsDailyIncomeModalOpen}
+                            setIsOccupancyModalOpen={setIsOccupancyModalOpen}
                         />
                         <ChartsSection
                             revenueChartData={revenueChartData}
@@ -879,8 +972,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 {/* ══ REGISTRO DE ACTIVIDAD ══ */}
                 {activeSection === 'registro' && (
                     <MovementsTable
-                        filteredMovements={filteredMovements}
-                        totalCaja={totalCaja}
+                        unifiedTransactions={unifiedTransactions}
+                        totalCaja={totalCajaUnified}
                         filters={filters}
                         setFilters={setFilters}
                         filtersOpen={filtersOpen}
@@ -889,6 +982,22 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                         uniqueVehicleTypes={uniqueVehicleTypes}
                         vehicleTypesMap={vehicleTypesMap}
                         staysLookup={staysLookup}
+                        getGarageName={getGarageName}
+                        GarageFilter={<GarageFilter />}
+                    />
+                )}
+
+                {/* ══ EGRESOS ══ */}
+                {activeSection === 'egresos' && (
+                    <ExpensesSection
+                        garages={garages}
+                        expenses={gExpenses}
+                        expenseTemplates={expenseTemplates}
+                        selectedGarageId={selectedGarageId}
+                        profile={profile}
+                        onExpenseCreated={(newExpense: Expense) => setExpenses(prev => [newExpense, ...prev])}
+                        onTemplateCreated={(newTemplate: ExpenseTemplate) => setExpenseTemplates(prev => [...prev, newTemplate])}
+                        onTemplateUpdated={(updated: ExpenseTemplate) => setExpenseTemplates(prev => prev.map(t => t.id === updated.id ? updated : t))}
                         getGarageName={getGarageName}
                         GarageFilter={<GarageFilter />}
                     />
@@ -927,6 +1036,14 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 dailyIncomeData={dailyIncomeData}
                 dailyIncomeMonthOffset={dailyIncomeMonthOffset}
                 setDailyIncomeMonthOffset={setDailyIncomeMonthOffset}
+            />
+
+            {/* ══ OCCUPANCY MODAL ══ */}
+            <OccupancyModal
+                isOpen={isOccupancyModalOpen}
+                onClose={() => setIsOccupancyModalOpen(false)}
+                cocheras={gCocheras}
+                activeStays={gStays}
             />
         </>
     );

@@ -13,6 +13,7 @@ interface KpiGridProps {
     setIsDebtModalOpen: (val: boolean) => void;
     setIsEficaciaModalOpen: (val: boolean) => void;
     setIsDailyIncomeModalOpen: (val: boolean) => void;
+    setIsOccupancyModalOpen: (val: boolean) => void;
 }
 
 export default function KpiGrid({
@@ -25,7 +26,8 @@ export default function KpiGrid({
     setIsHistoryModalOpen,
     setIsDebtModalOpen,
     setIsEficaciaModalOpen,
-    setIsDailyIncomeModalOpen
+    setIsDailyIncomeModalOpen,
+    setIsOccupancyModalOpen
 }: KpiGridProps) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -55,10 +57,14 @@ export default function KpiGrid({
                 <p className="text-[10px] text-slate-400 mt-1">Anterior: {formatCurrency(kpiFacturacion.previous)}</p>
             </div>
             {/* Ocupación */}
-            <div className="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <div onClick={() => setIsOccupancyModalOpen(true)}
+                className="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 active:scale-[0.98] transition-all cursor-pointer">
                 <div className="flex items-center justify-between mb-3">
                     <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600"><Building2 className="h-4 w-4" /></div>
-                    <ProgressRing percentage={kpiOcupacion.porcentaje} size={36} strokeWidth={3.5} />
+                    <div className="flex items-center gap-2">
+                        <ProgressRing percentage={kpiOcupacion.porcentaje} size={36} strokeWidth={3.5} />
+                        <Eye className="h-3.5 w-3.5 text-slate-300" />
+                    </div>
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Ocupación Real</p>
                 <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{kpiOcupacion.porcentaje}%</p>
@@ -72,10 +78,10 @@ export default function KpiGrid({
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Abonos Activos</p>
                 <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{kpiSubs.total}</p>
-                <div className="flex items-center gap-2 mt-1">
+                {/* <div className="flex items-center gap-2 mt-1">
                     <span className="text-[10px] text-emerald-600 flex items-center gap-0.5"><ArrowUpRight className="h-2.5 w-2.5" />{kpiSubs.altas}</span>
                     <span className="text-[10px] text-red-500 flex items-center gap-0.5"><ArrowDownRight className="h-2.5 w-2.5" />{kpiSubs.bajas}</span>
-                </div>
+                </div> */}
             </div>
             {/* Deuda */}
             <div onClick={() => kpiDeuda.count > 0 && setIsDebtModalOpen(true)}

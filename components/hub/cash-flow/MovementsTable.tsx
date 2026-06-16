@@ -1,9 +1,9 @@
 import React from 'react';
 import { List, Filter, ChevronUp, ChevronDown, X, Inbox, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { cn, formatCurrency, getAmountColor, formatDate, Movement, Stay } from './CashFlowShared';
+import { cn, formatCurrency, getAmountColor, formatDate, Movement, Stay, UnifiedTransaction } from './CashFlowShared';
 
 interface MovementsTableProps {
-    filteredMovements: Movement[];
+    unifiedTransactions: UnifiedTransaction[];
     totalCaja: number;
     filters: any;
     setFilters: React.Dispatch<React.SetStateAction<any>>;
@@ -18,7 +18,7 @@ interface MovementsTableProps {
 }
 
 export default function MovementsTable({
-    filteredMovements,
+    unifiedTransactions,
     totalCaja,
     filters,
     setFilters,
@@ -38,7 +38,7 @@ export default function MovementsTable({
                     <div className="p-2 rounded-lg bg-slate-100 text-slate-600"><List className="h-4 w-4" /></div>
                     <div>
                         <h3 className="text-sm font-bold text-slate-800">Registro de Movimientos</h3>
-                        <p className="text-[10px] text-slate-400">{filteredMovements.length} registros</p>
+                        <p className="text-[10px] text-slate-400">{unifiedTransactions.length} registros</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -103,6 +103,7 @@ export default function MovementsTable({
                                 <option value="Hora">Hora / Estadía</option>
                                 <option value="Abono">Abono</option>
                                 <option value="Anticipado">Anticipado</option>
+                                <option value="Egreso">Solo Egresos</option>
                             </select>
                         </div>
                         <div>
@@ -143,46 +144,65 @@ export default function MovementsTable({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {filteredMovements.length === 0 ? (
+                        {unifiedTransactions.length === 0 ? (
                             <tr><td colSpan={8} className="p-12 text-center text-slate-400 text-sm">
                                 <div className="flex flex-col items-center gap-2"><Inbox className="h-8 w-8 opacity-20" /><p>No hay movimientos en este período.</p></div>
                             </td></tr>
                         ) : (
-                            filteredMovements.slice(0, 500).map(move => (
-                                <tr key={move.id} className="hover:bg-indigo-50/40 transition-colors cursor-default">
-                                    <td className="px-4 py-3.5"><span className="font-medium text-slate-600 text-xs">{getGarageName(move.garage_id)}</span></td>
+                            unifiedTransactions.slice(0, 500).map(txn => (
+                                <tr key={txn.id} className={cn("hover:bg-indigo-50/40 transition-colors cursor-default", txn.source === 'expense' && "bg-red-50/30")}>
+                                    <td className="px-4 py-3.5"><span className="font-medium text-slate-600 text-xs">{getGarageName(txn.garage_id)}</span></td>
                                     <td className="px-4 py-3.5">
-                                        <div className="flex flex-col">
-                                            <span className="font-bold font-mono text-slate-800 tracking-wide">{move.plate || '---'}</span>
-                                            <span className="text-[10px] text-slate-400 uppercase">
-                                                {(move.plate && vehicleTypesMap[move.plate]) ? vehicleTypesMap[move.plate] : (move.vehicle_type || 'Vehículo')}
-                                            </span>
-                                        </div>
+                                        {txn.source === 'expense' ? (
+                                            <div className="flex flex-col">
+                                                <span className="font-bold font-mono text-slate-400 tracking-wide">N/A</span>
+                                                <span className="text-[10px] text-red-400 font-semibold uppercase">Egreso</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col">
+                                                <span className="font-bold font-mono text-slate-800 tracking-wide">{txn.plate || '---'}</span>
+                                                <span className="text-[10px] text-slate-400 uppercase">
+                                                    {(txn.plate && vehicleTypesMap[txn.plate]) ? vehicleTypesMap[txn.plate] : (txn.vehicle_type || 'Vehículo')}
+                                                </span>
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3.5 text-left text-xs font-medium">
-                                        {move.type === 'CobroEstadia' && move.related_entity_id && staysLookup[move.related_entity_id] ? (
+                                        {txn.source === 'movement' && txn.type === 'CobroEstadia' && txn.related_entity_id && staysLookup[txn.related_entity_id] ? (
                                             <div className="flex flex-col items-start gap-0.5">
                                                 <div className="flex items-center gap-1 text-slate-500 text-[10px]">
                                                     <ArrowUpRight className="h-3 w-3 opacity-60" />
-                                                    <span>{formatDate(staysLookup[move.related_entity_id].entry_time)}</span>
+                                                    <span>{formatDate(staysLookup[txn.related_entity_id].entry_time)}</span>
                                                 </div>
                                                 <div className="flex items-center gap-1 text-slate-700">
                                                     <ArrowDownRight className="h-3 w-3 opacity-60" />
-                                                    <span>{formatDate(staysLookup[move.related_entity_id].exit_time || move.timestamp)}</span>
+                                                    <span>{formatDate(staysLookup[txn.related_entity_id].exit_time || txn.timestamp)}</span>
                                                 </div>
                                             </div>
                                         ) : (
-                                            <span className="text-slate-500">{formatDate(move.timestamp)}</span>
+                                            <span className="text-slate-500">{formatDate(txn.timestamp)}</span>
                                         )}
                                     </td>
-                                    <td className="px-4 py-3.5"><span className="text-xs text-slate-600">{move.notes || '---'}</span></td>
                                     <td className="px-4 py-3.5">
-                                        <span className={cn("text-xs font-medium", (!move.operator || move.operator === 'Sistema') ? "text-slate-400" : "text-slate-600")}>
-                                            {move.operator || 'Sistema'}
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs text-slate-600">{txn.description || '---'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3.5">
+                                        <span className={cn("text-xs font-medium", (!txn.operator || txn.operator === 'Sistema') ? "text-slate-400" : "text-slate-600")}>
+                                            {txn.operator || 'Sistema'}
                                         </span>
                                     </td>
-                                    <td className="px-4 py-3.5"><span className="text-xs text-slate-500 font-medium font-mono">{move.payment_method ? move.payment_method.toUpperCase() : '---'}</span></td>
-                                    <td className={cn("px-4 py-3.5 text-right font-bold font-mono", getAmountColor(move.type))}>{formatCurrency(move.amount)}</td>
+                                    <td className="px-4 py-3.5">
+                                        <span className="text-xs text-slate-500 font-medium font-mono">
+                                            {txn.source === 'expense' ? '---' : (txn.payment_method?.toUpperCase() || '---')}
+                                        </span>
+                                    </td>
+                                    <td className={cn("px-4 py-3.5 text-right font-bold font-mono",
+                                        txn.source === 'expense' ? 'text-red-600' : getAmountColor(txn.type)
+                                    )}>
+                                        {txn.source === 'expense' ? `-${formatCurrency(txn.amount)}` : formatCurrency(txn.amount)}
+                                    </td>
                                 </tr>
                             ))
                         )}

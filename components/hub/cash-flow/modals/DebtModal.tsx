@@ -57,31 +57,61 @@ export default function DebtModal({ isOpen, onClose, debtDetailList, kpiDeudaTot
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            {debtDetailList.map((customer, i) => (
-                                <div key={customer.customerId || i} className="bg-slate-50/50 rounded-xl border border-slate-100 p-4">
-                                    <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
-                                        <div className="flex items-center gap-2">
-                                            <p className="text-sm font-bold text-slate-800">{customer.customerName}</p>
-                                            {customer.items.length > 1 && (
-                                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[9px] font-bold uppercase">
-                                                    {customer.items.length} meses
-                                                </span>
-                                            )}
-                                        </div>
-                                        <span className="text-sm font-bold font-mono text-amber-600 tabular-nums">
-                                            {formatCurrency(customer.totalDebt)}
-                                        </span>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        {customer.items.map(item => (
-                                            <div key={item.id} className="flex justify-between items-center text-[10px] text-slate-500">
-                                                <span>{item.monthLabel} - Cochera {item.cocheraNumero}</span>
-                                                <span className="font-mono text-slate-400">{formatCurrency(item.amount)}</span>
+                            {debtDetailList.map((customer, i) => {
+                                const groupedByCochera: Record<string, Record<string, number>> = {};
+                                let uniqueItemsCount = 0;
+
+                                customer.items.forEach(item => {
+                                    if (!groupedByCochera[item.cocheraNumero]) {
+                                        groupedByCochera[item.cocheraNumero] = {};
+                                    }
+                                    const monthKey = item.monthLabel; // Clave única por mes completo
+                                    if (groupedByCochera[item.cocheraNumero][monthKey] === undefined) {
+                                        groupedByCochera[item.cocheraNumero][monthKey] = 0;
+                                        uniqueItemsCount++;
+                                    }
+                                    groupedByCochera[item.cocheraNumero][monthKey] += item.amount;
+                                });
+
+                                return (
+                                    <div key={customer.customerId || i} className="bg-slate-50/50 rounded-xl border border-slate-100 p-4">
+                                        <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-sm font-bold text-slate-800">{customer.customerName}</p>
+                                                {uniqueItemsCount > 1 && (
+                                                    <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[9px] font-bold uppercase">
+                                                        {uniqueItemsCount} meses
+                                                    </span>
+                                                )}
                                             </div>
-                                        ))}
+                                            <span className="text-sm font-bold font-mono text-amber-600 tabular-nums">
+                                                {formatCurrency(customer.totalDebt)}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {Object.entries(groupedByCochera).map(([cocheraNumero, meses]) => (
+                                                <div key={cocheraNumero} className="space-y-1.5">
+                                                    <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                                                        Cochera {cocheraNumero}
+                                                    </p>
+                                                    <div className="space-y-1.5 pl-2 border-l-2 border-slate-100">
+                                                        {Object.entries(meses).map(([mesCompleto, amount]) => {
+                                                            const mesSimplificado = mesCompleto.split(' ')[0];
+                                                            const mesLabel = mesSimplificado.charAt(0).toUpperCase() + mesSimplificado.slice(1);
+                                                            return (
+                                                                <div key={mesCompleto} className="flex justify-between items-center text-[10px] text-slate-500">
+                                                                    <span>{mesLabel}</span>
+                                                                    <span className="font-mono text-slate-400">{formatCurrency(amount)}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>

@@ -73,7 +73,59 @@ export interface Cochera {
     precio_base?: number;
 }
 
-export type ActiveSection = 'resumen' | 'sucursal' | 'registro';
+export type ActiveSection = 'resumen' | 'sucursal' | 'registro' | 'egresos';
+
+// ── Expense Template (recurrence definition) ──
+export interface ExpenseTemplate {
+    id: string;
+    garage_id: string;
+    owner_id: string;
+    description: string;
+    amount: number;
+    recurrence_day: number;  // 1-31
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+// ── Expense (executed expense record) ──
+export interface Expense {
+    id: string;
+    garage_id: string;
+    owner_id: string;
+    template_id: string | null;
+    description: string;
+    amount: number;
+    expense_type: 'fixed' | 'recurring';
+    expense_date: string;   // ISO timestamp
+    created_at: string;
+    created_by: string | null;
+}
+
+// ── Unified Transaction (for MovementsTable merge) ──
+export type TransactionSource = 'movement' | 'expense';
+
+export interface UnifiedTransaction {
+    id: string;
+    source: TransactionSource;
+    garage_id: string;
+    timestamp: string;       // ISO — unified sort key
+    amount: number;
+    description: string;     // notes for movement, description for expense
+    plate: string | null;    // null for expenses
+    type: string;            // Movement.type or 'EGRESO'
+    payment_method: string | null;
+    operator: string | null;
+    // Movement-only fields
+    related_entity_id?: string | null;
+    ticket_number?: string | null;
+    invoice_type?: string | null;
+    vehicle_type?: string | null;
+    // Expense-only fields
+    expense_type?: 'fixed' | 'recurring';
+}
+
+
 
 // ─────────────────────────────────────────────────────────────
 // §2. Format Utilities
@@ -126,7 +178,8 @@ export const getTimeElapsed = (entryTime: string) => {
     return `${diffMins}m`;
 };
 
-export const getAmountColor = (type: Movement['type'] | string) => {
+export const getAmountColor = (type: Movement['type'] | string, source?: TransactionSource) => {
+    if (source === 'expense') return 'text-red-600';
     if (type === 'RETIRO' || type === 'EGRESO') return 'text-red-600';
     if (type === 'INGRESO' || type === 'CobroEstadia' || type === 'CobroAbono' || type === 'COBRO' || type === 'CAJA_INICIAL') return 'text-emerald-600';
     return 'text-slate-800';
