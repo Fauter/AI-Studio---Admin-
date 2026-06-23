@@ -19,10 +19,10 @@ export default function OccupancyModal({ isOpen, onClose, cocheras, activeStays 
     const ocupadas = useMemo(() => cocheras.filter(c => c.status === 'Ocupada'), [cocheras]);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-xl border border-slate-200/60 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="fixed inset-0 md:relative bg-white rounded-none md:rounded-2xl w-full h-full md:h-auto md:w-full md:max-w-4xl md:max-h-[80vh] flex flex-col shadow-xl border-0 md:border border-slate-200/60 overflow-hidden">
                 {/* Header */}
-                <div className="sticky top-0 z-10 flex items-center justify-between p-6 bg-white/80 backdrop-blur-md border-b border-slate-100">
+                <div className="sticky top-0 z-10 flex items-center justify-between p-4 md:p-6 bg-white/80 backdrop-blur-md border-b border-slate-100">
                     <div>
                         <h2 className="text-xl font-bold text-slate-800">Ocupación Real</h2>
                         <p className="text-sm text-slate-500 mt-1">
@@ -38,7 +38,7 @@ export default function OccupancyModal({ isOpen, onClose, cocheras, activeStays 
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-8">
                     
                     {/* Section 1: Cocheras Libres */}
                     <section>

@@ -66,7 +66,7 @@ export default function MovementsTable({
                                 className="text-[10px] text-slate-500 hover:text-indigo-600 font-medium transition-colors flex items-center gap-0.5"><X className="h-3 w-3" /> Limpiar</button>
                         )}
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
                         <div>
                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">Operador</label>
                             <select value={filters.operatorId} onChange={(e) => setFilters((p: any) => ({ ...p, operatorId: e.target.value }))}
@@ -132,7 +132,7 @@ export default function MovementsTable({
             {/* Movements Table */}
             <div className="h-[500px] overflow-auto">
                 <table className="w-full text-sm text-left">
-                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/80 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-100">
+                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/80 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-100 hidden md:table-header-group">
                         <tr>
                             <th className="px-4 py-3 font-semibold">Garaje</th>
                             <th className="px-4 py-3 font-semibold">Patente</th>
@@ -143,16 +143,52 @@ export default function MovementsTable({
                             <th className="px-4 py-3 font-semibold text-right">Monto</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-slate-100 block md:table-row-group">
                         {unifiedTransactions.length === 0 ? (
                             <tr><td colSpan={8} className="p-12 text-center text-slate-400 text-sm">
                                 <div className="flex flex-col items-center gap-2"><Inbox className="h-8 w-8 opacity-20" /><p>No hay movimientos en este período.</p></div>
                             </td></tr>
                         ) : (
                             unifiedTransactions.slice(0, 500).map(txn => (
-                                <tr key={txn.id} className={cn("hover:bg-indigo-50/40 transition-colors cursor-default", txn.source === 'expense' && "bg-red-50/30")}>
-                                    <td className="px-4 py-3.5"><span className="font-medium text-slate-600 text-xs">{getGarageName(txn.garage_id)}</span></td>
-                                    <td className="px-4 py-3.5">
+                                <tr key={txn.id} className={cn("hover:bg-indigo-50/40 transition-colors cursor-default flex flex-col md:table-row py-3 px-4 md:py-0 md:px-0", txn.source === 'expense' && "bg-red-50/30")}>
+                                    {/* MOBILE ONLY COMPOSITE ROW */}
+                                    <td className="md:hidden flex flex-col w-full">
+                                        {/* Renglón 1 */}
+                                        <div className="flex w-full items-center justify-start gap-2 mb-1">
+                                            <span className={cn("font-bold font-mono text-sm shrink-0", txn.source === 'expense' ? 'text-red-600' : getAmountColor(txn.type))}>
+                                                {txn.source === 'expense' ? `-${formatCurrency(txn.amount)}` : formatCurrency(txn.amount)}
+                                            </span>
+                                            <span className="text-slate-300 font-light">|</span>
+                                            <span className="font-bold text-slate-800 text-sm truncate">
+                                                {txn.source === 'expense' ? 'EGRESO' : (txn.plate || '---')}
+                                            </span>
+                                        </div>
+                                        {/* Renglón 2 */}
+                                        <div className="flex justify-between items-center mt-1">
+                                            <span className="text-xs text-slate-600 truncate mr-2 flex-1">
+                                                {txn.description || 'Sin descripción'} • <span className="font-medium text-indigo-600">{getGarageName(txn.garage_id)}</span>
+                                            </span>
+                                            <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                                {txn.source === 'expense' ? '---' : (txn.payment_method || '---')}
+                                            </span>
+                                        </div>
+                                        {/* Renglón 3 */}
+                                        <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+                                            {txn.source === 'movement' && txn.type === 'CobroEstadia' && txn.related_entity_id && staysLookup[txn.related_entity_id] ? (
+                                                <span>
+                                                    {formatDate(staysLookup[txn.related_entity_id].entry_time)} - {formatDate(staysLookup[txn.related_entity_id].exit_time || txn.timestamp)}
+                                                </span>
+                                            ) : (
+                                                <span>{formatDate(txn.timestamp)}</span>
+                                            )}
+                                            <span>•</span>
+                                            <span>{txn.operator ? txn.operator.substring(0, 3).toUpperCase() : 'SYS'}</span>
+                                        </div>
+                                    </td>
+
+                                    {/* DESKTOP CELLS (Hidden on mobile) */}
+                                    <td className="hidden md:table-cell px-4 py-3.5"><span className="font-medium text-slate-600 text-xs">{getGarageName(txn.garage_id)}</span></td>
+                                    <td className="hidden md:table-cell px-4 py-3.5">
                                         {txn.source === 'expense' ? (
                                             <div className="flex flex-col">
                                                 <span className="font-bold font-mono text-slate-400 tracking-wide">N/A</span>
@@ -167,7 +203,7 @@ export default function MovementsTable({
                                             </div>
                                         )}
                                     </td>
-                                    <td className="px-4 py-3.5 text-left text-xs font-medium">
+                                    <td className="hidden md:table-cell px-4 py-3.5 text-left text-xs font-medium">
                                         {txn.source === 'movement' && txn.type === 'CobroEstadia' && txn.related_entity_id && staysLookup[txn.related_entity_id] ? (
                                             <div className="flex flex-col items-start gap-0.5">
                                                 <div className="flex items-center gap-1 text-slate-500 text-[10px]">
@@ -183,22 +219,22 @@ export default function MovementsTable({
                                             <span className="text-slate-500">{formatDate(txn.timestamp)}</span>
                                         )}
                                     </td>
-                                    <td className="px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5">
                                         <div className="flex flex-col gap-1">
                                             <span className="text-xs text-slate-600">{txn.description || '---'}</span>
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5">
                                         <span className={cn("text-xs font-medium", (!txn.operator || txn.operator === 'Sistema') ? "text-slate-400" : "text-slate-600")}>
                                             {txn.operator || 'Sistema'}
                                         </span>
                                     </td>
-                                    <td className="px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5">
                                         <span className="text-xs text-slate-500 font-medium font-mono">
                                             {txn.source === 'expense' ? '---' : (txn.payment_method?.toUpperCase() || '---')}
                                         </span>
                                     </td>
-                                    <td className={cn("px-4 py-3.5 text-right font-bold font-mono",
+                                    <td className={cn("hidden md:table-cell px-4 py-3.5 text-right font-bold font-mono",
                                         txn.source === 'expense' ? 'text-red-600' : getAmountColor(txn.type)
                                     )}>
                                         {txn.source === 'expense' ? `-${formatCurrency(txn.amount)}` : formatCurrency(txn.amount)}

@@ -719,10 +719,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     /** Garage filter — rendered inline where needed */
     const GarageFilter = () => (
-        <div className="relative mb-1">
+        <div className="relative mb-1 w-full md:w-auto">
             <Filter className="absolute left-2.5 top-[8px] h-3.5 w-3.5 text-slate-400 pointer-events-none" />
             <select value={selectedGarageId} onChange={(e) => setSelectedGarageId(e.target.value)}
-                className="pl-8 pr-4 py-1 text-xs h-[30px] bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
+                className="pl-8 pr-4 py-1 text-xs h-[30px] w-full md:w-auto bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
                 <option value="all">Todos los Garajes</option>
                 {garages.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
             </select>
@@ -777,8 +777,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                     </div>
 
                     {/* SUB-NAVBAR — Minimalist underline style */}
-                    <div className="flex items-end justify-between border-b border-slate-200 h-[42px]">
-                        <div className="flex items-center gap-1">
+                    <div className="flex flex-col md:flex-row items-start md:items-end justify-between border-b border-slate-200 pb-2 md:pb-0 h-auto md:h-[42px] gap-2 md:gap-0">
+                        <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-hide w-full md:w-auto">
                             {sections.map(s => {
                                 const Icon = s.icon;
                                 const isActive = activeSection === s.key;

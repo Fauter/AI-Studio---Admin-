@@ -34,12 +34,12 @@ export default function EficaciaModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4" onClick={onClose}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
-            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg min-h-[550px] max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            <div className="fixed inset-0 md:relative bg-white rounded-none md:rounded-2xl shadow-xl w-full h-full md:h-auto md:w-full md:max-w-lg md:min-h-[550px] md:max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
                 onClick={e => e.stopPropagation()}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <div className="flex items-center justify-between p-4 md:px-6 md:py-4 border-b border-slate-100 flex-wrap md:flex-nowrap gap-4">
                     <div className="flex items-center gap-2.5">
                         <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><Target className="h-4 w-4" /></div>
                         <div>
@@ -47,7 +47,7 @@ export default function EficaciaModal({
                             <p className="text-[10px] text-slate-400 capitalize">{eficaciaTimeline.monthLabel}</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
                         <div className="flex items-center justify-between gap-1 bg-slate-100 rounded-lg p-1 min-w-[150px]">
                             <button onClick={() => setEficaciaMonthOffset(prev => prev + 1)} className="p-1.5 rounded hover:bg-white hover:shadow-sm text-slate-500 transition-all shrink-0">
                                 <ChevronDown className="h-3.5 w-3.5" />
@@ -66,14 +66,14 @@ export default function EficaciaModal({
                     </div>
                 </div>
                 {/* Content */}
-                <div className="overflow-auto flex-1 px-6 py-3">
+                <div className="overflow-auto flex-1 p-4 md:px-6 md:py-3">
                     {eficaciaTimeline.timeline.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
                             <Calendar className="h-8 w-8 opacity-20" />
                             <p className="text-xs">Sin cobros de abonos en este mes</p>
                         </div>
                     ) : (
-                        <div className="divide-y divide-slate-100">
+                        <div className="divide-y divide-slate-100 w-full overflow-x-auto scrollbar-hide">
                             <div className="flex items-center justify-between py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                 <span className="w-16">Día</span>
                                 <span className="flex-1 text-right">Recaudado</span>
@@ -135,7 +135,7 @@ export default function EficaciaModal({
                     )}
                 </div>
                 {/* Footer */}
-                <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-b-2xl">
+                <div className="p-4 md:px-6 md:py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-b-2xl">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Potencial Teórico</span>
                     <span className="text-base font-bold font-mono text-slate-700">{formatCurrency(kpiEficaciaPotencialTotal)}</span>
                 </div>

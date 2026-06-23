@@ -349,9 +349,9 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                 <UserPlus className="h-5 w-5 text-slate-500" />
                 <h3 className="font-bold text-slate-800">Registrar Personal</h3>
               </div>
-              <form onSubmit={handleCreateUser} className="p-6 space-y-5">
+              <form onSubmit={handleCreateUser} className="p-4 md:p-6 space-y-5">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input type="text" placeholder="Nombre" required value={newUser.firstName} onChange={e => setNewUser({ ...newUser, firstName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
                     <input type="text" placeholder="Apellido" required value={newUser.lastName} onChange={e => setNewUser({ ...newUser, lastName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
                   </div>
@@ -379,7 +379,7 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
           <div className="xl:col-span-8">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <table className="w-full text-sm text-left">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-xs font-semibold">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-xs font-semibold hidden md:table-header-group">
                   <tr>
                     <th className="px-6 py-4">Empleado</th>
                     <th className="px-6 py-4">Usuario</th>
@@ -387,15 +387,25 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                     <th className="px-6 py-4 text-right">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 block md:table-row-group">
                   {staff.map(s => {
                     const roleConfig = ROLE_UI_CONFIG[s.role] || { label: s.role, style: 'bg-slate-100' };
                     return (
-                      <tr key={s.id} className="hover:bg-slate-50/50">
-                        <td className="px-6 py-4 font-bold text-slate-800">{s.first_name} {s.last_name}</td>
-                        <td className="px-6 py-4 font-mono text-slate-500">{s.username}</td>
-                        <td className="px-6 py-4"><span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", roleConfig.style)}>{roleConfig.label}</span></td>
-                        <td className="px-6 py-4 text-right">
+                      <tr key={s.id} className="hover:bg-slate-50/50 block md:table-row border border-slate-200 md:border-0 rounded-xl md:rounded-none mb-3 md:mb-0 bg-white md:bg-transparent shadow-sm md:shadow-none p-4 md:p-0">
+                        <td className="flex justify-between items-center md:table-cell px-0 py-2 md:px-6 md:py-4 border-b border-slate-100 md:border-0">
+                          <span className="md:hidden font-semibold text-xs text-slate-500 uppercase">Empleado</span>
+                          <span className="font-bold text-slate-800">{s.first_name} {s.last_name}</span>
+                        </td>
+                        <td className="flex justify-between items-center md:table-cell px-0 py-2 md:px-6 md:py-4 border-b border-slate-100 md:border-0">
+                          <span className="md:hidden font-semibold text-xs text-slate-500 uppercase">Usuario</span>
+                          <span className="font-mono text-slate-500">{s.username}</span>
+                        </td>
+                        <td className="flex justify-between items-center md:table-cell px-0 py-2 md:px-6 md:py-4 border-b border-slate-100 md:border-0">
+                          <span className="md:hidden font-semibold text-xs text-slate-500 uppercase">Rol</span>
+                          <span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", roleConfig.style)}>{roleConfig.label}</span>
+                        </td>
+                        <td className="flex justify-between items-center md:table-cell px-0 py-2 md:px-6 md:py-4 text-right">
+                          <span className="md:hidden font-semibold text-xs text-slate-500 uppercase">Acciones</span>
                           <button onClick={() => handleEditClick(s)} className="text-slate-400 hover:text-indigo-600 p-2 transition-colors" title="Editar empleado"><Pencil className="h-4 w-4" /></button>
                         </td>
                       </tr>
@@ -523,9 +533,9 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleUpdateUser} className="p-6 space-y-5">
+            <form onSubmit={handleUpdateUser} className="p-4 md:p-6 space-y-5">
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input type="text" placeholder="Nombre" required value={editForm.firstName} onChange={e => setEditForm({ ...editForm, firstName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
                   <input type="text" placeholder="Apellido" required value={editForm.lastName} onChange={e => setEditForm({ ...editForm, lastName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
@@ -779,7 +789,7 @@ export default function OnboardingPage() {
             <div className="bg-indigo-600 p-1.5 rounded-lg"><Shield className="h-5 w-5 text-white" /></div>
             <span className="font-bold text-slate-900 text-lg tracking-tight hidden md:block">GarageIA Hub</span>
           </div>
-          <nav className="flex space-x-1 bg-slate-100 p-1 rounded-xl">
+          <nav className="flex space-x-1 bg-slate-100 p-1 rounded-xl overflow-x-auto whitespace-nowrap scrollbar-hide">
             {allowedTabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;

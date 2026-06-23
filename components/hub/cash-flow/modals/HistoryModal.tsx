@@ -17,10 +17,10 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
             {/* Modal */}
-            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            <div className="relative bg-white rounded-2xl shadow-xl w-[95%] md:w-full md:max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
                 onClick={e => e.stopPropagation()}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <div className="flex items-center justify-between p-4 md:px-6 md:py-4 border-b border-slate-100">
                     <div className="flex items-center gap-2.5">
                         <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600"><TrendingUp className="h-4 w-4" /></div>
                         <div>
@@ -34,7 +34,7 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
                     </button>
                 </div>
                 {/* Content */}
-                <div className="overflow-auto flex-1 px-6 py-3">
+                <div className="overflow-auto flex-1 p-4 md:px-6 md:py-3">
                     {loading ? (
                         <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-3">
                             <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />

@@ -29,10 +29,10 @@ export default function DebtModal({ isOpen, onClose, debtDetailList, kpiDeudaTot
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
-            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            <div className="relative bg-white rounded-2xl shadow-xl w-[95%] md:w-full md:max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
                 onClick={e => e.stopPropagation()}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <div className="flex items-center justify-between p-4 md:px-6 md:py-4 border-b border-slate-100">
                     <div className="flex items-center gap-2.5">
                         <div className="p-2 rounded-lg bg-amber-50 text-amber-600"><AlertCircle className="h-4 w-4" /></div>
                         <div>
@@ -49,7 +49,7 @@ export default function DebtModal({ isOpen, onClose, debtDetailList, kpiDeudaTot
                     </div>
                 </div>
                 {/* Content */}
-                <div className="overflow-auto flex-1 px-6 py-3">
+                <div className="overflow-auto flex-1 p-4 md:px-6 md:py-3">
                     {debtDetailList.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
                             <AlertCircle className="h-8 w-8 opacity-20" />
@@ -116,7 +116,7 @@ export default function DebtModal({ isOpen, onClose, debtDetailList, kpiDeudaTot
                     )}
                 </div>
                 {/* Footer */}
-                <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-b-2xl">
+                <div className="p-4 md:px-6 md:py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-b-2xl">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Deuda</span>
                     <span className="text-base font-bold font-mono text-amber-700">{formatCurrency(kpiDeudaTotal)}</span>
                 </div>

@@ -276,9 +276,9 @@ export default function ExpensesSection({
                 <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
 
                     {/* ── Header: Search + Filters + Register Button ── */}
-                    <div className="px-4 py-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <div className="relative flex-1 min-w-[180px] max-w-sm">
+                    <div className="px-4 py-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3 w-full">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0 flex-1 w-full">
+                            <div className="relative flex-1 min-w-[180px] sm:max-w-sm w-full">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                     <Search className="w-4 h-4 text-slate-400" />
                                 </div>
@@ -292,11 +292,11 @@ export default function ExpensesSection({
                             </div>
 
                             {/* Garage filter — native select */}
-                            <div className="relative">
+                            <div className="relative w-full sm:w-auto">
                                 <select
                                     value={tableGarageFilter}
                                     onChange={e => setTableGarageFilter(e.target.value)}
-                                    className="appearance-none bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 pl-3 pr-8 py-1.5 cursor-pointer transition-all"
+                                    className="appearance-none bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 pl-3 pr-8 py-1.5 w-full cursor-pointer transition-all"
                                 >
                                     <option value="all">Todos los Garajes</option>
                                     {garages.map(g => (
@@ -311,7 +311,7 @@ export default function ExpensesSection({
 
                         <button
                             onClick={() => { resetForm(); setIsModalOpen(true); }}
-                            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-900 shadow-sm shadow-slate-200 transition-all"
+                            className="shrink-0 flex justify-center items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-900 shadow-sm shadow-slate-200 transition-all w-full sm:w-auto"
                         >
                             <Plus className="w-4 h-4" />
                             Registrar Egreso
@@ -321,7 +321,7 @@ export default function ExpensesSection({
                     {/* ── Expense History Table ── */}
                     <div>
                         <table className="w-full text-sm text-left">
-                            <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/95">
+                            <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/95 hidden md:table-header-group">
                                 <tr>
                                     <th
                                         className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
@@ -350,7 +350,7 @@ export default function ExpensesSection({
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-slate-100 block md:table-row-group">
                                 {filteredExpenses.length === 0 ? (
                                     <>
                                         <tr className="h-[52px] border-b border-slate-100">
@@ -370,29 +370,57 @@ export default function ExpensesSection({
                                 ) : (
                                     <>
                                         {paginatedExpenses.map(expense => (
-                                            <tr key={expense.id} className="h-[52px] border-b border-slate-100 last:border-0 bg-white hover:bg-slate-50/80 transition-colors group">
-                                                <td className="px-4">
+                                            <tr key={expense.id} className="flex flex-col md:table-row py-3 px-4 md:py-0 md:px-0 border-b border-slate-100 bg-white hover:bg-slate-50/80 transition-colors group">
+                                                {/* Mobile Wrap */}
+                                                <td className="md:hidden flex flex-col w-full">
+                                                    {/* Renglón 1 */}
+                                                    <div className="flex justify-start gap-2 items-center mb-1">
+                                                        <span className="text-rose-600 font-mono font-bold shrink-0 text-sm">
+                                                            -{formatCurrency(expense.amount)}
+                                                        </span>
+                                                        <span className="text-slate-300 font-light">|</span>
+                                                        <span className="font-bold text-slate-800 text-sm truncate">
+                                                            {expense.imputation || '—'}
+                                                        </span>
+                                                    </div>
+                                                    {/* Renglón 2 */}
+                                                    <div className="flex justify-between items-center text-xs mt-1">
+                                                        <span className="truncate pr-2 text-slate-600">
+                                                            {expense.description || 'Sin descripción'}
+                                                        </span>
+                                                        <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-semibold shrink-0">
+                                                            {getGarageName(expense.garage_id, expense.custom_garage_name)}
+                                                        </span>
+                                                    </div>
+                                                    {/* Renglón 3 */}
+                                                    <div className="flex items-center text-[10px] text-slate-400 mt-1">
+                                                        <span>{formatDate(expense.expense_date, false)}</span>
+                                                    </div>
+                                                </td>
+
+                                                {/* Desktop Cells */}
+                                                <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="text-xs font-mono font-medium text-slate-500">
                                                         {formatDate(expense.expense_date, false)}
                                                     </span>
                                                 </td>
-                                                <td className="px-4">
+                                                <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="text-xs font-semibold text-slate-600">
                                                         {getGarageName(expense.garage_id, expense.custom_garage_name)}
                                                     </span>
                                                 </td>
-                                                <td className="px-4">
+                                                <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600">
                                                         <ClipboardList className="w-3 h-3" />
                                                         {expense.imputation || '—'}
                                                     </span>
                                                 </td>
-                                                <td className="px-4">
+                                                <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="text-sm text-slate-500">
                                                         {expense.description || '—'}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 text-right">
+                                                <td className="hidden md:table-cell px-4 h-[52px] text-right">
                                                     <span className="font-mono font-bold text-rose-600/90 text-sm bg-rose-50/50 group-hover:bg-rose-50 px-2 py-0.5 rounded-lg transition-colors inline-block">
                                                         -{formatCurrency(expense.amount)}
                                                     </span>
@@ -442,8 +470,8 @@ export default function ExpensesSection({
                 MODAL — Registrar Egreso
                ═══════════════════════════════════════════════════════════ */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-end md:items-center justify-center p-0 md:p-4">
+                    <div className="bg-white w-full h-full md:h-auto md:max-w-lg rounded-none md:rounded-2xl overflow-hidden flex flex-col">
 
                         {/* Modal Header */}
                         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -462,7 +490,7 @@ export default function ExpensesSection({
                         </div>
 
                         {/* Modal Body — Form */}
-                        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+                        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
 
                             {successMessage && (
                                 <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 font-medium animate-in fade-in duration-200">
