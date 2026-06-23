@@ -7,7 +7,7 @@ interface KpiGridProps {
     kpiFacturacion: { current: number; previous: number; variation: number };
     kpiOcupacion: { ocupadas: number; cocherasOcupadas: number; estadiasActivas: number; totalSpots: number; porcentaje: number };
     kpiSubs: { altas: number; bajas: number; total: number };
-    kpiDeuda: { total: number; isAlert: boolean; count: number };
+    kpiDeuda: { total: number; isAlert: boolean; count: number; uniqueDebtors: number };
     kpiEficacia: { percentage: number; monthRev: number; potencialTotal: number };
     setIsHistoryModalOpen: (val: boolean) => void;
     setIsDebtModalOpen: (val: boolean) => void;
@@ -98,7 +98,9 @@ export default function KpiGrid({
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Deuda Pendiente</p>
                 <p className={cn("text-2xl font-bold font-mono tracking-tight", kpiDeuda.isAlert ? "text-amber-700" : "text-slate-800")}>{formatCurrency(kpiDeuda.total)}</p>
-                <p className="text-[10px] text-slate-400 mt-1">{kpiDeuda.count} pendiente{kpiDeuda.count !== 1 ? 's' : ''}</p>
+                <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                    {kpiDeuda.uniqueDebtors} deudor{kpiDeuda.uniqueDebtors !== 1 ? 'es' : ''} • {kpiDeuda.count} mes{kpiDeuda.count !== 1 ? 'es' : ''}
+                </p>
             </div>
             {/* Eficacia */}
             <div onClick={() => setIsEficaciaModalOpen(true)}

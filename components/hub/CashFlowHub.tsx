@@ -5,6 +5,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { Garage, BuildingLevel } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
+import { useCashFlowStore } from '../../store/cashFlowStore';
 
 import {
     cn,
@@ -19,7 +20,6 @@ import {
     Debt,
     Cochera,
     Expense,
-    ExpenseTemplate,
     UnifiedTransaction
 } from './cash-flow/CashFlowShared';
 import KpiGrid from './cash-flow/KpiGrid';
@@ -54,24 +54,14 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         exactDate: '', startDate: '', endDate: ''
     });
 
-    const [movements, setMovements] = useState<Movement[]>([]);
-    const [stays, setStays] = useState<Stay[]>([]);
-    const [allStays, setAllStays] = useState<Stay[]>([]);
-    const [vehicles, setVehicles] = useState<{ plate: string; type: string; is_subscriber?: boolean; garage_id?: string; customer_id?: string }[]>([]);
-    const [employees, setEmployees] = useState<{ id: string; full_name: string }[]>([]);
-    const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-    const [debts, setDebts] = useState<Debt[]>([]);
-    const [cocheras, setCocheras] = useState<Cochera[]>([]);
-    const [buildingLevels, setBuildingLevels] = useState<BuildingLevel[]>([]);
-    const [expenses, setExpenses] = useState<Expense[]>([]);
-    const [expenseTemplates, setExpenseTemplates] = useState<ExpenseTemplate[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [loadingProgress, setLoadingProgress] = useState(0);
-    const [loadingStep, setLoadingStep] = useState('Iniciando...');
-    const [tariffs, setTariffs] = useState<any[]>([]);
-    const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
-    const [prices, setPrices] = useState<any[]>([]);
-    const [error, setError] = useState<string | null>(null);
+    const {
+        movements, stays, allStays, vehicles, employees, subscriptions, debts,
+        cocheras, buildingLevels, expenses, tariffs, vehicleTypes, prices,
+        loadingTier1: loading, loadingTier2, loadingProgress, loadingStep, error,
+        fetchTier1, fetchTier2,
+        addExpense
+    } = useCashFlowStore();
+
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
     const [isEficaciaModalOpen, setIsEficaciaModalOpen] = useState(false);
@@ -80,148 +70,13 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const [eficaciaMonthOffset, setEficaciaMonthOffset] = useState(0);
     const [dailyIncomeMonthOffset, setDailyIncomeMonthOffset] = useState(0);
 
-    // §4a. Data Fetching
+    // §4a. Data Fetching (Tiered)
     useEffect(() => {
-        if (garages.length === 0) { setLoading(false); return; }
-        const fetchData = async () => {
-            setLoading(true); setError(null);
-            setLoadingProgress(0);
-            setLoadingStep('Preparando carga...');
-
-            const retry = async <T = any,>(fn: () => any, retries = 3): Promise<T> => {
-                for (let i = 0; i < retries; i++) {
-                    const { data, error } = await fn();
-                    if (!error) return data as T;
-                    if (i === retries - 1) throw error;
-                    await new Promise(r => setTimeout(r, 1000 * (i + 1))); // exponential backoff
-                }
-                throw new Error("Unreachable");
-            };
-
-            try {
-                const garageIds = garages.map(g => g.id);
-                // Fetch from January 1st of the current year for full historical visibility
-                const now = new Date();
-                const firstDayOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-                const movementsSince = firstDayOfYear.toISOString();
-
-                // Etapa 1 (10%): Configuración base.
-                setLoadingProgress(10);
-                setLoadingStep('Cargando configuración base...');
-
-                const tariffsData = await retry(() => supabase.from('tariffs').select('id, name, type, garage_id').in('garage_id', garageIds));
-                const vehicleTypesData = await retry(() => supabase.from('vehicle_types').select('id, name, garage_id').in('garage_id', garageIds));
-
-                setTariffs(tariffsData || []);
-                setVehicleTypes(vehicleTypesData || []);
-
-                // Etapa 2 (20%): Cocheras y Niveles.
-                setLoadingProgress(20);
-                setLoadingStep('Cargando estructura operativa...');
-
-                const cocherasData = await retry(() => supabase.from('cocheras').select('id, garage_id, tipo, status, numero, cliente_id, vehiculos, precio_base').in('garage_id', garageIds));
-                const levelsData = await retry(() => supabase.from('building_levels').select('id, garage_id, display_name, total_spots').in('garage_id', garageIds));
-
-                setCocheras((cocherasData || []) as Cochera[]);
-                setBuildingLevels((levelsData || []) as BuildingLevel[]);
-
-                // Etapa 3 (40%): Precios, Debts y Subscripciones.
-                setLoadingProgress(40);
-                setLoadingStep('Cargando tarifario y abonos...');
-
-                const pricesData = await retry(() => supabase.from('prices').select('amount, tariff_id, vehicle_type_id'));
-                const subsData = await retry(() => supabase.from('subscriptions').select('id, garage_id, customer_id, start_date, end_date, active, price, type').in('garage_id', garageIds));
-                const debtsData = await retry(() => supabase.from('debts').select('id, remaining_amount, status, due_date, customer_id, garage_id, created_at, amount, subscription_id, customers:customer_id(name), subscriptions:subscription_id(type)').in('garage_id', garageIds).eq('status', 'PENDING'));
-
-                setPrices(pricesData || []);
-                setSubscriptions((subsData || []) as Subscription[]);
-                setDebts((debtsData || []) as Debt[]);
-
-                // Etapa 4 (80%): Vehicles y Stays Activos.
-                setLoadingProgress(80);
-                setLoadingStep('Cargando datos operativos...');
-
-                const nowStays = new Date();
-                const oneMonthAgo = new Date(nowStays.getFullYear(), nowStays.getMonth() - 1, nowStays.getDate()).toISOString();
-
-                const vehiclesData = await retry(() => supabase.from('vehicles').select('plate, type, is_subscriber, garage_id, customer_id').in('garage_id', garageIds));
-                const activeStaysData = await retry(() => supabase.from('stays').select('*').in('garage_id', garageIds).eq('active', true).order('entry_time', { ascending: false }));
-                const allStaysData = await retry(() => supabase.from('stays').select('id,garage_id,plate,entry_time,exit_time,vehicle_type,active').in('garage_id', garageIds).gte('entry_time', oneMonthAgo).order('entry_time', { ascending: false }).limit(3000));
-
-                setVehicles(vehiclesData || []);
-                setStays((activeStaysData || []) as Stay[]);
-                setAllStays((allStaysData || []) as Stay[]);
-
-                // Etapa 4.5: Egresos
-                setLoadingStep('Cargando egresos...');
-
-                const expensesData = await retry(() => supabase
-                    .from('expenses')
-                    .select('id, garage_id, owner_id, template_id, description, amount, expense_type, expense_date, created_at, created_by')
-                    .in('garage_id', garageIds)
-                    .gte('expense_date', movementsSince)
-                    .order('expense_date', { ascending: false })
-                );
-
-                const templatesData = await retry(() => supabase
-                    .from('expense_templates')
-                    .select('*')
-                    .in('garage_id', garageIds)
-                    .eq('is_active', true)
-                );
-
-                setExpenses((expensesData || []) as Expense[]);
-                setExpenseTemplates((templatesData || []) as ExpenseTemplate[]);
-
-                // Etapa 5 (100%): Movements Paginados
-                setLoadingProgress(100);
-                setLoadingStep('Cargando histórico de movimientos...');
-
-                const PAGE_SIZE = 1000;
-                let allMovements: Movement[] = [];
-                let from = 0;
-                let keepFetching = true;
-                while (keepFetching) {
-                    const batch = await retry(() => supabase
-                        .from('movements')
-                        .select('id, amount, type, timestamp, payment_method, plate, garage_id, operator, related_entity_id, ticket_number, invoice_type, notes')
-                        .in('garage_id', garageIds)
-                        .gte('timestamp', movementsSince)
-                        .order('timestamp', { ascending: false })
-                        .range(from, from + PAGE_SIZE - 1)
-                    );
-                    const rows = (batch || []) as Movement[];
-                    allMovements = allMovements.concat(rows);
-                    if (rows.length < PAGE_SIZE) {
-                        keepFetching = false;
-                    } else {
-                        from += PAGE_SIZE;
-                        setLoadingStep(`Analizando ${allMovements.length} movimientos históricos...`);
-                    }
-                }
-
-                setLoadingStep('Sincronizando operadores...');
-
-                let empData: { id: string; full_name: string }[] = [];
-                if (profile?.id) {
-                    try {
-                        const res = await retry<any[]>(() => supabase.from('employee_accounts').select('id, first_name, last_name, garage_id, role').eq('owner_id', profile.id)) || [];
-                        empData = res.map((e: any) => ({ id: e.id, full_name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || 'Operario' }));
-                    } catch (e) {
-                        console.warn('Error silenciado al cargar empleados:', e);
-                    }
-                }
-
-                setMovements(allMovements);
-                setEmployees(empData);
-                setLoadingStep('Conexión estable con Supabase');
-            } catch (err: any) {
-                console.error('Error fetching dashboard data:', err);
-                setError('No se pudieron cargar los datos financieros.');
-            } finally { setLoading(false); }
-        };
-        fetchData();
-    }, [garages, profile?.id]);
+        if (garages.length === 0) return;
+        fetchTier1(garages, profile?.id).then(() => {
+            fetchTier2(garages);
+        });
+    }, [garages, profile?.id, fetchTier1, fetchTier2]);
 
     // §4b. Lookup Maps
     const staysLookup = useMemo(() => {
@@ -248,7 +103,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         return Array.from(types).sort();
     }, [vehicles]);
 
-    const getGarageName = (id: string) => garages.find(g => g.id === id)?.name || 'Desconocido';
+    const getGarageName = (id: string | null, customName?: string | null) => {
+        if (!id) return customName || 'Otro';
+        return garages.find(g => g.id === id)?.name || 'Desconocido';
+    };
     const cleanDescription = (notes?: string) => {
         if (!notes) return '---';
         return notes.includes('-') ? notes.split('-')[0].trim() : notes;
@@ -444,7 +302,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             return new Date(m.timestamp).getTime() >= inicioMes ? a + Number(m.amount ?? 0) : a;
         }, 0);
         const isAlert = monthRevenue > 0 && total > monthRevenue * 0.1;
-        return { total, isAlert, count: deudasValidas.length };
+        const uniqueDebtors = new Set(deudasValidas.map(d => d.customer_id).filter(Boolean)).size;
+        return { total, isAlert, count: deudasValidas.length, uniqueDebtors };
     }, [gDebts, gMovements, clientesConCochera]);
 
     const debtDetailList = useMemo(() => {
@@ -766,7 +625,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             return {
                 id: g.id, name: g.name || 'Sin Nombre', effectivo, digital, total: todayTotal,
                 occupancy, deuda, spots, occupied, activeSubs,
-                monthlyExpenses, expenseCount: garageExpenses.length, monthlyRevenue
+                monthlyExpenses, expenseCount: garageExpenses.length, monthlyRevenue,
+                expenses: garageExpenses
             };
         });
     }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera, expenses]);
@@ -822,15 +682,17 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         const expenseTxns: UnifiedTransaction[] = gExpenses.map(e => ({
             id: e.id,
             source: 'expense' as const,
-            garage_id: e.garage_id,
+            garage_id: e.garage_id || '',
             timestamp: e.expense_date,
             amount: Number(e.amount ?? 0),
-            description: e.description,
+            description: e.imputation + (e.description ? ` — ${e.description}` : ''),
             plate: null,
             type: 'EGRESO',
             payment_method: '---',
             operator: e.created_by || null,
             expense_type: e.expense_type,
+            imputation: e.imputation,
+            custom_garage_name: e.custom_garage_name,
         }));
 
         return [...movementTxns, ...expenseTxns]
@@ -857,10 +719,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     /** Garage filter — rendered inline where needed */
     const GarageFilter = () => (
-        <div className="relative">
-            <Filter className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 pointer-events-none" />
+        <div className="relative mb-1">
+            <Filter className="absolute left-2.5 top-[8px] h-3.5 w-3.5 text-slate-400 pointer-events-none" />
             <select value={selectedGarageId} onChange={(e) => setSelectedGarageId(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
+                className="pl-8 pr-4 py-1 text-xs h-[30px] bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
                 <option value="all">Todos los Garajes</option>
                 {garages.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
             </select>
@@ -896,12 +758,12 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     return (
         <>
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-2">
                     {/* HEADER */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-500/20">
+                            <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-500/20">
                                 <Activity className="h-5 w-5 text-white" />
                             </div>
                             <div>
@@ -915,14 +777,14 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                     </div>
 
                     {/* SUB-NAVBAR — Minimalist underline style */}
-                    <div className="flex items-center justify-between border-b border-slate-200">
+                    <div className="flex items-end justify-between border-b border-slate-200 h-[42px]">
                         <div className="flex items-center gap-1">
                             {sections.map(s => {
                                 const Icon = s.icon;
                                 const isActive = activeSection === s.key;
                                 return (
                                     <button key={s.key} onClick={() => setActiveSection(s.key)}
-                                        className={cn("flex items-center gap-2 px-4 py-3 text-xs font-semibold border-b-2 transition-all -mb-px",
+                                        className={cn("flex items-center gap-2 px-4 py-2 text-xs font-semibold border-b-2 transition-all -mb-px",
                                             isActive ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300")}>
                                         <Icon className="h-3.5 w-3.5" />
                                         <span className="hidden md:inline">{s.label}</span>
@@ -931,9 +793,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                             })}
                         </div>
                         {activeSection === 'resumen' && (
-                            <div className="pb-2">
-                                <GarageFilter />
-                            </div>
+                            <GarageFilter />
                         )}
                     </div>
                 </div>
@@ -992,12 +852,9 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                     <ExpensesSection
                         garages={garages}
                         expenses={gExpenses}
-                        expenseTemplates={expenseTemplates}
                         selectedGarageId={selectedGarageId}
                         profile={profile}
-                        onExpenseCreated={(newExpense: Expense) => setExpenses(prev => [newExpense, ...prev])}
-                        onTemplateCreated={(newTemplate: ExpenseTemplate) => setExpenseTemplates(prev => [...prev, newTemplate])}
-                        onTemplateUpdated={(updated: ExpenseTemplate) => setExpenseTemplates(prev => prev.map(t => t.id === updated.id ? updated : t))}
+                        onExpenseCreated={addExpense}
                         getGarageName={getGarageName}
                         GarageFilter={<GarageFilter />}
                     />
@@ -1009,6 +866,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 isOpen={isHistoryModalOpen}
                 onClose={() => setIsHistoryModalOpen(false)}
                 monthlyHistory={monthlyHistory}
+                loading={loadingTier2}
             />
 
             {/* ══ DEBT DETAIL MODAL ══ */}

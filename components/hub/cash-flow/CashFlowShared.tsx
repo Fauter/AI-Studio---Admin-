@@ -75,28 +75,19 @@ export interface Cochera {
 
 export type ActiveSection = 'resumen' | 'sucursal' | 'registro' | 'egresos';
 
-// ── Expense Template (recurrence definition) ──
-export interface ExpenseTemplate {
-    id: string;
-    garage_id: string;
-    owner_id: string;
-    description: string;
-    amount: number;
-    recurrence_day: number;  // 1-31
-    is_active: boolean;
-    created_at: string;
-    updated_at: string;
-}
+
 
 // ── Expense (executed expense record) ──
 export interface Expense {
     id: string;
-    garage_id: string;
+    garage_id: string | null;
     owner_id: string;
     template_id: string | null;
-    description: string;
+    description?: string | null;
+    imputation: string;
+    custom_garage_name?: string | null;
     amount: number;
-    expense_type: 'fixed' | 'recurring';
+    expense_type: string;
     expense_date: string;   // ISO timestamp
     created_at: string;
     created_by: string | null;
@@ -122,7 +113,9 @@ export interface UnifiedTransaction {
     invoice_type?: string | null;
     vehicle_type?: string | null;
     // Expense-only fields
-    expense_type?: 'fixed' | 'recurring';
+    expense_type?: string;
+    imputation?: string;
+    custom_garage_name?: string | null;
 }
 
 
@@ -162,10 +155,13 @@ export function getArgentinaDateAnchors() {
     return { now, inicioHoy, inicioAyer, inicioManana };
 }
 
-export const formatDate = (isoString: string) => {
+export const formatDate = (isoString: string, showTime: boolean = true) => {
     if (!isoString) return '-';
     const d = new Date(typeof isoString === 'string' ? isoString.replace(' ', 'T') : isoString);
     const pad = (n: number) => n.toString().padStart(2, '0');
+    if (!showTime) {
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+    }
     return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 

@@ -1,186 +1,159 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Clock, CheckCircle2, AlertTriangle, Repeat, X, Calendar, BadgeDollarSign, Trash2 } from 'lucide-react';
+import { Plus, X, CheckCircle2, BadgeDollarSign, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Calendar } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { Garage } from '../../../types';
-import { cn, formatCurrency, formatDate, Expense, ExpenseTemplate } from './CashFlowShared';
+import { cn, formatCurrency, formatDate, Expense } from './CashFlowShared';
+
+// ─────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────
+
+const IMPUTATION_OPTIONS = [
+    'Artículos de Limpieza',
+    'Mantenimiento General',
+    'Feriados y otros Cubre-Francos',
+    'Gratificación',
+    'Gastos de Oficina',
+    'Combustible',
+    'Movilidad',
+    'Librería',
+    'Anticipos de Sueldo',
+] as const;
+
+const OTHER_GARAGE_VALUE = '__other__';
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+/** Returns today's date in YYYY-MM-DD format using local timezone */
+function getLocalDateString(): string {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Props Interface
+// ─────────────────────────────────────────────────────────────
 
 interface ExpensesSectionProps {
     garages: Garage[];
     expenses: Expense[];
-    expenseTemplates: ExpenseTemplate[];
     selectedGarageId: string;
     profile: { id: string; full_name?: string | null; email?: string | null } | null;
     onExpenseCreated: (expense: Expense) => void;
-    onTemplateCreated: (template: ExpenseTemplate) => void;
-    onTemplateUpdated: (template: ExpenseTemplate) => void;
-    getGarageName: (id: string) => string;
-    GarageFilter: React.ReactNode; // Can be placed somewhere if needed, maybe above table
+    getGarageName: (id: string | null, customName?: string | null) => string;
+    GarageFilter?: React.ReactNode;
 }
 
-interface PendingTask {
-    id: string; // `${template.id}-${year}-${month}`
-    template: ExpenseTemplate;
-    periodStr: string; // 'YYYY-MM'
-    year: number;
-    month: number;
-}
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 
 export default function ExpensesSection({
     garages,
     expenses,
-    expenseTemplates,
     selectedGarageId,
     profile,
     onExpenseCreated,
-    onTemplateCreated,
-    onTemplateUpdated,
     getGarageName,
-    GarageFilter,
 }: ExpensesSectionProps) {
+    // ── Modal state ──
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
     // ── Form state ──
-    const [expenseMode, setExpenseMode] = useState<'fixed' | 'recurring'>('fixed');
     const [formGarageId, setFormGarageId] = useState(selectedGarageId !== 'all' ? selectedGarageId : '');
+    const [formCustomGarageName, setFormCustomGarageName] = useState('');
+    const [formDate, setFormDate] = useState(getLocalDateString);
+    const [formImputation, setFormImputation] = useState('');
     const [formDescription, setFormDescription] = useState('');
     const [formAmountStr, setFormAmountStr] = useState('');
-    const [formRecurrenceDay, setFormRecurrenceDay] = useState('1');
     const [saving, setSaving] = useState(false);
     const [successMessage, setSuccessMessage] = useState('');
-    const [formErrors, setFormErrors] = useState<{ garageId?: boolean; description?: boolean; amount?: boolean }>({});
+    const [formErrors, setFormErrors] = useState<{ garageId?: boolean; imputation?: boolean; amount?: boolean }>({});
 
-    // ── Pending template confirmation state ──
-    const [confirmingTaskId, setConfirmingTaskId] = useState<string | null>(null);
-    const [revokingId, setRevokingId] = useState<string | null>(null);
-    const [confirmedTaskIds, setConfirmedTaskIds] = useState<Set<string>>(new Set());
+    // ── Table state ──
+    const [searchQuery, setSearchQuery] = useState('');
+    const [tableGarageFilter, setTableGarageFilter] = useState('all');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'garage' | 'imputation' | 'amount'; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+    const ITEMS_PER_PAGE = 25;
 
-    // Update garage ID if selected outside changes
+    // ── Sync form garage when global filter changes ──
     useEffect(() => {
         if (selectedGarageId !== 'all') {
             setFormGarageId(selectedGarageId);
         }
     }, [selectedGarageId]);
 
-    // ── Filtered templates for selected garage ──
-    const filteredTemplates = useMemo(() => {
-        return expenseTemplates.filter(t => {
-            if (!t.is_active) return false;
-            if (selectedGarageId !== 'all' && t.garage_id !== selectedGarageId) return false;
-            return true;
-        });
-    }, [expenseTemplates, selectedGarageId]);
-
-    // ── Pending recurring expenses (on-read materialization) ──
-    const pendingTasks = useMemo(() => {
-        const tasks: PendingTask[] = [];
-        const now = new Date();
-        const currentY = now.getFullYear();
-        const currentM = now.getMonth();
-        const currentD = now.getDate();
-
-        filteredTemplates.forEach(t => {
-            const created = new Date(t.created_at);
-            let y = created.getFullYear();
-            let m = created.getMonth();
-
-            // Safety limit (e.g. 2 years back max) to prevent infinite loops on bad data
-            if (y < currentY - 2) y = currentY - 2;
-
-            while (y < currentY || (y === currentY && m <= currentM)) {
-                let shouldTrigger = false;
-                if (y < currentY || m < currentM) {
-                    shouldTrigger = true; // Past months
-                } else if (y === currentY && m === currentM) {
-                    shouldTrigger = currentD >= t.recurrence_day; // Current month
-                }
-
-                if (shouldTrigger) {
-                    const periodStr = `${y}-${(m + 1).toString().padStart(2, '0')}`;
-                    const taskId = `${t.id}-${periodStr}`;
-                    const exists = expenses.some(e =>
-                        e.template_id === t.id && e.expense_date.startsWith(periodStr)
-                    );
-                    if (!exists && !confirmedTaskIds.has(taskId)) {
-                        tasks.push({ id: taskId, template: t, periodStr, year: y, month: m });
-                    }
-                }
-
-                m++;
-                if (m > 11) {
-                    m = 0;
-                    y++;
-                }
-            }
-        });
-
-        // Sort oldest first
-        return tasks.sort((a, b) => a.periodStr.localeCompare(b.periodStr));
-    }, [filteredTemplates, expenses, confirmedTaskIds]);
-
-    // ── Confirm a pending recurring expense ──
-    const handleConfirmTask = async (task: PendingTask) => {
-        setConfirmingTaskId(task.id);
-        try {
-            // Create target date handling end-of-month clamp
-            const date = new Date(task.year, task.month, task.template.recurrence_day);
-            if (date.getMonth() !== task.month) {
-                date.setDate(0); // Clamp to last day of intended month
-            }
-
-            const { data, error } = await supabase.from('expenses').insert({
-                garage_id: task.template.garage_id,
-                owner_id: task.template.owner_id,
-                template_id: task.template.id,
-                description: task.template.description,
-                amount: task.template.amount,
-                expense_type: 'recurring',
-                expense_date: date.toISOString(),
-                created_by: profile?.full_name || 'Sistema',
-            }).select().single();
-
-            if (error) throw error;
-            onExpenseCreated(data as Expense);
-            setConfirmedTaskIds(prev => new Set(prev).add(task.id));
-        } catch (err) {
-            console.error('Error confirming recurring expense:', err);
-        } finally {
-            setConfirmingTaskId(null);
+    // ── Lock body scroll when modal is open ──
+    useEffect(() => {
+        if (isModalOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = 'unset';
         }
-    };
+        return () => { document.body.style.overflow = 'unset'; };
+    }, [isModalOpen]);
 
-    // ── Revoke a template ──
-    const handleRevokeTemplate = async (templateId: string) => {
-        setRevokingId(templateId);
-        try {
-            const { data, error } = await supabase
-                .from('expense_templates')
-                .update({ is_active: false })
-                .eq('id', templateId)
-                .select()
-                .single();
+    // ── Reset page on filter change ──
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, tableGarageFilter]);
 
-            if (error) throw error;
-            if (data) {
-                onTemplateUpdated(data as ExpenseTemplate);
-                showSuccess('Egreso programado revocado exitosamente');
-            }
-        } catch (err) {
-            console.error('Error revoking template:', err);
-        } finally {
-            setRevokingId(null);
+    // ─────────────────────────────────────────────────────────
+    // Filtered + Sorted Expenses
+    // ─────────────────────────────────────────────────────────
+
+    const filteredExpenses = useMemo(() => {
+        let filtered = [...expenses];
+
+        if (searchQuery.trim() !== '') {
+            const q = searchQuery.toLowerCase();
+            filtered = filtered.filter(e =>
+                (e.imputation || '').toLowerCase().includes(q) ||
+                (e.description || '').toLowerCase().includes(q) ||
+                getGarageName(e.garage_id, e.custom_garage_name).toLowerCase().includes(q)
+            );
         }
-    };
 
-    // ── Form Handling ──
-    const showSuccess = (msg: string) => {
-        setSuccessMessage(msg);
-        setTimeout(() => setSuccessMessage(''), 3000);
-    };
+        if (tableGarageFilter !== 'all') {
+            filtered = filtered.filter(e => e.garage_id === tableGarageFilter);
+        }
 
-    const resetForm = () => {
-        setFormDescription('');
-        setFormAmountStr('');
-        setFormRecurrenceDay('1');
-        setFormErrors({});
-    };
+        filtered.sort((a, b) => {
+            let valA: any, valB: any;
+            if (sortConfig.key === 'date') {
+                valA = new Date(a.expense_date).getTime();
+                valB = new Date(b.expense_date).getTime();
+            } else if (sortConfig.key === 'garage') {
+                valA = getGarageName(a.garage_id, a.custom_garage_name).toLowerCase();
+                valB = getGarageName(b.garage_id, b.custom_garage_name).toLowerCase();
+            } else if (sortConfig.key === 'imputation') {
+                valA = (a.imputation || '').toLowerCase();
+                valB = (b.imputation || '').toLowerCase();
+            } else if (sortConfig.key === 'amount') {
+                valA = a.amount;
+                valB = b.amount;
+            }
+            if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return filtered;
+    }, [expenses, searchQuery, tableGarageFilter, sortConfig, getGarageName]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE));
+    const paginatedExpenses = filteredExpenses.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+    const emptyRowsCount = ITEMS_PER_PAGE - paginatedExpenses.length;
+
+    // ─────────────────────────────────────────────────────────
+    // Form Handlers
+    // ─────────────────────────────────────────────────────────
 
     const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const rawValue = e.target.value.replace(/\D/g, '');
@@ -193,82 +166,68 @@ export default function ExpensesSection({
         if (formErrors.amount) setFormErrors(prev => ({ ...prev, amount: false }));
     };
 
-    const handleDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let val = parseInt(e.target.value, 10);
-        if (isNaN(val)) {
-            setFormRecurrenceDay('');
-            return;
-        }
-        if (val < 1) val = 1;
-        if (val > 31) val = 31;
-        setFormRecurrenceDay(val.toString());
+    const showSuccess = (msg: string) => {
+        setSuccessMessage(msg);
+        setTimeout(() => setSuccessMessage(''), 3000);
+    };
+
+    const resetForm = () => {
+        setFormGarageId(selectedGarageId !== 'all' ? selectedGarageId : '');
+        setFormCustomGarageName('');
+        setFormDate(getLocalDateString());
+        setFormImputation('');
+        setFormDescription('');
+        setFormAmountStr('');
+        setFormErrors({});
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-
         const rawAmount = parseFloat(formAmountStr.replace(/\./g, ''));
 
         const errors = {
             garageId: !formGarageId,
-            description: !formDescription.trim(),
-            amount: isNaN(rawAmount) || rawAmount <= 0
+            imputation: !formImputation,
+            amount: isNaN(rawAmount) || rawAmount <= 0,
         };
-
         setFormErrors(errors);
         if (Object.values(errors).some(Boolean)) return;
 
         setSaving(true);
         try {
-            if (expenseMode === 'fixed') {
-                const { data, error } = await supabase.from('expenses').insert({
-                    garage_id: formGarageId,
-                    owner_id: profile?.id || '',
-                    template_id: null,
-                    description: formDescription.trim(),
-                    amount: rawAmount,
-                    expense_type: 'fixed',
-                    expense_date: new Date().toISOString(),
-                    created_by: profile?.full_name || 'Sistema',
-                }).select().single();
+            const isOtherGarage = formGarageId === OTHER_GARAGE_VALUE;
 
-                if (error) throw error;
+            // Build the expense_date as an ISO string from the local date
+            // We parse formDate as local midnight to avoid UTC-3 day shifting
+            const [year, month, day] = formDate.split('-').map(Number);
+            const localDate = new Date(year, month - 1, day, 12, 0, 0); // noon to avoid any edge
+
+            const payload = {
+                garage_id: isOtherGarage ? null : formGarageId,
+                custom_garage_name: isOtherGarage ? (formCustomGarageName.trim() || 'Otro') : null,
+                owner_id: profile?.id || '',
+                template_id: null,
+                imputation: formImputation,
+                description: formDescription.trim() || null,
+                amount: rawAmount,
+                expense_type: 'fixed',
+                expense_date: localDate.toISOString(),
+                created_by: profile?.full_name || 'Sistema',
+            };
+
+            const { data, error } = await supabase
+                .from('expenses')
+                .insert(payload)
+                .select('*')
+                .single();
+
+            if (error) throw error;
+            if (data) {
                 onExpenseCreated(data as Expense);
                 showSuccess('Egreso registrado correctamente');
-            } else {
-                const recurrenceDayNum = parseInt(formRecurrenceDay, 10) || 1;
-                const { data: templateData, error: templateError } = await supabase.from('expense_templates').insert({
-                    garage_id: formGarageId,
-                    owner_id: profile?.id || '',
-                    description: formDescription.trim(),
-                    amount: rawAmount,
-                    recurrence_day: recurrenceDayNum,
-                    is_active: true,
-                }).select().single();
-
-                if (templateError) throw templateError;
-                onTemplateCreated(templateData as ExpenseTemplate);
-
-                // Also register current month's expense immediately
-                const currentD = new Date().getDate();
-                if (currentD >= recurrenceDayNum) {
-                    const { data: expenseData, error: expenseError } = await supabase.from('expenses').insert({
-                        garage_id: formGarageId,
-                        owner_id: profile?.id || '',
-                        template_id: templateData.id,
-                        description: formDescription.trim(),
-                        amount: rawAmount,
-                        expense_type: 'recurring',
-                        expense_date: new Date().toISOString(),
-                        created_by: profile?.full_name || 'Sistema',
-                    }).select().single();
-
-                    if (expenseError) throw expenseError;
-                    onExpenseCreated(expenseData as Expense);
-                }
-                showSuccess('Egreso programado configurado exitosamente');
+                resetForm();
+                setIsModalOpen(false);
             }
-            resetForm();
         } catch (err) {
             console.error('Error creating expense:', err);
         } finally {
@@ -276,376 +235,367 @@ export default function ExpensesSection({
         }
     };
 
-    // ── Recent expenses ──
-    const recentExpenses = useMemo(() => {
-        return [...expenses]
-            .sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime())
-            .slice(0, 50);
-    }, [expenses]);
+    // ─────────────────────────────────────────────────────────
+    // Sort handler
+    // ─────────────────────────────────────────────────────────
 
-    // ── Input classes ──
-    const getInputClass = (hasError?: boolean) => cn(
-        "w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-sm text-slate-800 outline-none transition-all",
-        hasError
-            ? "border-red-400 ring-2 ring-red-500/20 bg-red-50/50"
-            : "border-slate-200 focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10"
-    );
-    const labelClasses = 'block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5';
-
-    // Helper for period strings
-    const getPeriodLabel = (year: number, month: number) => {
-        const date = new Date(year, month, 1);
-        return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+    const handleSort = (key: typeof sortConfig.key) => {
+        setSortConfig(prev => ({
+            key,
+            direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
+        }));
     };
 
+    const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
+        if (sortConfig.key !== column) return <ArrowUpDown className="w-3 h-3 opacity-30" />;
+        return sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
+    };
+
+    // ─────────────────────────────────────────────────────────
+    // Style helpers
+    // ─────────────────────────────────────────────────────────
+
+    const getInputClass = (hasError?: boolean) => cn(
+        "w-full px-3 py-2 bg-slate-50 border rounded-lg text-sm text-slate-800 outline-none transition-all",
+        hasError
+            ? "border-red-400 ring-2 ring-red-500/20 bg-red-50/50"
+            : "border-slate-200 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/10"
+    );
+
+    const labelClasses = 'block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1';
+
+    const todayStr = getLocalDateString();
+
+    // ─────────────────────────────────────────────────────────
+    // Render
+    // ─────────────────────────────────────────────────────────
+
     return (
-        <div className="animate-in fade-in duration-300">
+        <>
+            <div className="animate-in fade-in duration-300">
+                <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
 
-            {/* ═══════════════════════════════════════════════════════════
-                §1 — Full Width Pending Banner
-               ═══════════════════════════════════════════════════════════ */}
-            {pendingTasks.length > 0 && (
-                <div className="mb-6 bg-amber-50/70 border border-amber-200/60 rounded-2xl p-5 shadow-sm">
-                    <div className="flex items-center gap-2 mb-4">
-                        <Repeat className="h-4 w-4 text-amber-600" />
-                        <h3 className="text-sm font-bold text-amber-800">Egresos Programados Pendientes</h3>
-                        <span className="ml-auto text-[10px] font-bold bg-amber-200/60 text-amber-700 px-2.5 py-0.5 rounded-full">
-                            {pendingTasks.length} {pendingTasks.length === 1 ? 'pendiente' : 'pendientes'}
-                        </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                        {pendingTasks.map(task => (
-                            <div
-                                key={task.id}
-                                className="flex items-center justify-between gap-3 bg-white border border-amber-200/50 rounded-xl p-3.5 shadow-sm"
-                            >
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className="p-2 rounded-lg bg-amber-100/50 text-amber-600 shrink-0">
-                                        <AlertTriangle className="h-4 w-4" />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-semibold text-slate-800 truncate">
-                                            {task.template.description}
-                                        </p>
-                                        <div className="flex flex-col text-[10px] text-slate-500">
-                                            <span className="capitalize">{getPeriodLabel(task.year, task.month)}</span>
-                                            <span className="font-mono font-bold text-red-500 mt-0.5">
-                                                {formatCurrency(task.template.amount)}
-                                            </span>
-                                        </div>
-                                    </div>
+                    {/* ── Header: Search + Filters + Register Button ── */}
+                    <div className="px-4 py-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="relative flex-1 min-w-[180px] max-w-sm">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search className="w-4 h-4 text-slate-400" />
                                 </div>
-                                <button
-                                    onClick={() => handleConfirmTask(task)}
-                                    disabled={confirmingTaskId === task.id}
-                                    className={cn(
-                                        'shrink-0 px-3.5 py-2 rounded-lg text-xs font-bold transition-all',
-                                        confirmingTaskId === task.id
-                                            ? 'bg-slate-100 text-slate-400 cursor-wait'
-                                            : 'bg-amber-500 text-white hover:bg-amber-600 hover:shadow-md'
-                                    )}
-                                >
-                                    {confirmingTaskId === task.id ? '...' : 'Confirmar'}
-                                </button>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar egresos..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 outline-none focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                                />
                             </div>
-                        ))}
-                    </div>
-                </div>
-            )}
 
-            {/* ═══════════════════════════════════════════════════════════
-                §2 — CSS Grid Layout
-               ═══════════════════════════════════════════════════════════ */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-                {/* ── Columna Izquierda: Formulario ── */}
-                <div className="lg:col-span-5">
-                    <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden sticky top-6">
-                        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                                <Plus className="h-5 w-5 text-indigo-500" /> Registrar Egreso
-                            </h3>
+                            {/* Garage filter — native select */}
+                            <div className="relative">
+                                <select
+                                    value={tableGarageFilter}
+                                    onChange={e => setTableGarageFilter(e.target.value)}
+                                    className="appearance-none bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 pl-3 pr-8 py-1.5 cursor-pointer transition-all"
+                                >
+                                    <option value="all">Todos los Garajes</option>
+                                    {garages.map(g => (
+                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                    ))}
+                                </select>
+                                <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                                </div>
+                            </div>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                        <button
+                            onClick={() => { resetForm(); setIsModalOpen(true); }}
+                            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-900 shadow-sm shadow-slate-200 transition-all"
+                        >
+                            <Plus className="w-4 h-4" />
+                            Registrar Egreso
+                        </button>
+                    </div>
 
-                            {/* Segmented Control */}
-                            <div className="flex bg-slate-100/80 p-1 rounded-xl shadow-inner">
-                                <button
-                                    type="button"
-                                    onClick={() => setExpenseMode('fixed')}
-                                    className={cn(
-                                        'flex-1 py-2 rounded-lg text-sm font-bold transition-all',
-                                        expenseMode === 'fixed'
-                                            ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50'
-                                            : 'text-slate-500 hover:text-slate-700'
-                                    )}
-                                >
-                                    Gasto Fijo
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setExpenseMode('recurring')}
-                                    className={cn(
-                                        'flex-1 py-2 rounded-lg text-sm font-bold transition-all',
-                                        expenseMode === 'recurring'
-                                            ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50'
-                                            : 'text-slate-500 hover:text-slate-700'
-                                    )}
-                                >
-                                    Programado
-                                </button>
-                            </div>
-
-                            {successMessage && (
-                                <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700 font-medium animate-in fade-in zoom-in duration-300">
-                                    <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-                                    {successMessage}
-                                    <button type="button" onClick={() => setSuccessMessage('')} className="ml-auto text-emerald-400 hover:text-emerald-600">
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            )}
-
-                            <div className="space-y-4">
-                                {/* Garaje */}
-                                <div>
-                                    <label className={labelClasses}>Garaje Asignado</label>
-                                    <select
-                                        value={formGarageId}
-                                        onChange={e => { setFormGarageId(e.target.value); if (formErrors.garageId) setFormErrors({ ...formErrors, garageId: false }); }}
-                                        className={getInputClass(formErrors.garageId)}
+                    {/* ── Expense History Table ── */}
+                    <div>
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/95">
+                                <tr>
+                                    <th
+                                        className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
+                                        onClick={() => handleSort('date')}
                                     >
-                                        <option value="">Seleccionar garaje…</option>
-                                        {garages.map(g => (
-                                            <option key={g.id} value={g.id}>{g.name}</option>
-                                        ))}
-                                    </select>
-                                    {formErrors.garageId && <p className="text-[11px] text-red-500 mt-1 font-medium">Este campo es obligatorio</p>}
-                                </div>
-
-                                {/* Descripción */}
-                                <div>
-                                    <label className={labelClasses}>Motivo o Descripción</label>
-                                    <input
-                                        type="text"
-                                        value={formDescription}
-                                        onChange={e => { setFormDescription(e.target.value); if (formErrors.description) setFormErrors({ ...formErrors, description: false }); }}
-                                        placeholder="Ej: Mantenimiento mensual"
-                                        className={getInputClass(formErrors.description)}
-                                    />
-                                    {formErrors.description && <p className="text-[11px] text-red-500 mt-1 font-medium">Este campo es obligatorio</p>}
-                                </div>
-
-                                {/* Monto */}
-                                <div>
-                                    <label className={labelClasses}>Monto a Registrar</label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                                            <span className="text-slate-400 font-bold">$</span>
-                                        </div>
-                                        <input
-                                            type="text"
-                                            value={formAmountStr}
-                                            onChange={handleAmountChange}
-                                            placeholder="0"
-                                            className={cn(getInputClass(formErrors.amount), "pl-8 font-mono font-medium")}
-                                        />
-                                    </div>
-                                    {formErrors.amount && <p className="text-[11px] text-red-500 mt-1 font-medium">Ingrese un monto válido</p>}
-                                </div>
-
-                                {/* Día del mes (Organic transition for Recurrente) */}
-                                <div className={cn(
-                                    "overflow-hidden transition-all duration-300 ease-in-out",
-                                    expenseMode === 'recurring' ? "opacity-100 max-h-40" : "opacity-0 max-h-0"
-                                )}>
-                                    <label className={labelClasses}>Día del mes (Ejecución)</label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                                            <Calendar className="h-4 w-4 text-slate-400" />
-                                        </div>
-                                        <input
-                                            type="number"
-                                            value={formRecurrenceDay}
-                                            onChange={handleDayChange}
-                                            className={cn(getInputClass(), "pl-9")}
-                                        />
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-                                        Si el mes en curso tiene menos días, se aplicará el último día hábil del mes.
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Submit */}
-                            <button
-                                type="submit"
-                                disabled={saving}
-                                className={cn(
-                                    'w-full py-3.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2',
-                                    saving
-                                        ? 'bg-slate-100 text-slate-400 cursor-wait'
-                                        : 'bg-slate-800 text-white hover:bg-slate-900 shadow-md shadow-slate-200'
-                                )}
-                            >
-                                {saving ? (
+                                        <div className="flex items-center gap-1">Fecha <SortIcon column="date" /></div>
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
+                                        onClick={() => handleSort('garage')}
+                                    >
+                                        <div className="flex items-center gap-1">Garaje <SortIcon column="garage" /></div>
+                                    </th>
+                                    <th
+                                        className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
+                                        onClick={() => handleSort('imputation')}
+                                    >
+                                        <div className="flex items-center gap-1">Imputación <SortIcon column="imputation" /></div>
+                                    </th>
+                                    <th className="px-4 py-2 font-semibold">Observaciones</th>
+                                    <th
+                                        className="px-4 py-2 font-semibold text-right cursor-pointer hover:bg-slate-100 transition-colors"
+                                        onClick={() => handleSort('amount')}
+                                    >
+                                        <div className="flex items-center justify-end gap-1">Importe <SortIcon column="amount" /></div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredExpenses.length === 0 ? (
                                     <>
-                                        <div className="h-4 w-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-                                        Registrando…
-                                    </>
-                                ) : (
-                                    'Registrar Egreso'
-                                )}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-                {/* ── Columna Derecha: Historial ── */}
-                <div className="lg:col-span-7">
-                    <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden h-full flex flex-col">
-                        <div className="px-5 py-4 flex items-center gap-3 border-b border-slate-100">
-                            <div className="p-2.5 rounded-xl bg-slate-50 text-slate-600 border border-slate-100">
-                                <Clock className="h-4 w-4" />
-                            </div>
-                            <div className="flex-1">
-                                <h3 className="text-base font-bold text-slate-800">Historial de Egresos</h3>
-                                <p className="text-xs text-slate-400">Últimos movimientos registrados</p>
-                            </div>
-                            {GarageFilter}
-                        </div>
-
-                        <div className="flex-1 overflow-auto bg-slate-50/30" style={{ maxHeight: '700px' }}>
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/95 sticky top-0 backdrop-blur-sm z-10 shadow-sm">
-                                    <tr>
-                                        <th className="px-5 py-3.5 font-semibold">Fecha / Garaje</th>
-                                        <th className="px-5 py-3.5 font-semibold">Descripción</th>
-                                        <th className="px-5 py-3.5 font-semibold text-center">Tipo</th>
-                                        <th className="px-5 py-3.5 font-semibold text-right">Monto</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100/80">
-                                    {recentExpenses.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={4} className="p-16 text-center">
-                                                <div className="flex flex-col items-center justify-center gap-3">
-                                                    <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center">
-                                                        <BadgeDollarSign className="h-6 w-6 text-slate-300" />
-                                                    </div>
-                                                    <p className="text-sm font-medium text-slate-400">No hay egresos registrados</p>
+                                        <tr className="h-[52px] border-b border-slate-100">
+                                            <td colSpan={5} className="text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <BadgeDollarSign className="h-4 w-4 text-slate-300" />
+                                                    <span className="text-sm font-medium text-slate-400">
+                                                        {searchQuery ? 'No se encontraron resultados' : 'No hay egresos registrados'}
+                                                    </span>
                                                 </div>
                                             </td>
                                         </tr>
-                                    ) : (
-                                        recentExpenses.map(expense => (
-                                            <tr key={expense.id} className="bg-white hover:bg-slate-50/80 transition-colors group">
-                                                <td className="px-5 py-3.5">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <span className="text-xs font-mono font-medium text-slate-500">
-                                                            {formatDate(expense.expense_date)}
-                                                        </span>
-                                                        <span className="text-[11px] font-bold text-slate-400">
-                                                            {getGarageName(expense.garage_id)}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-5 py-3.5">
-                                                    <span className="text-sm font-medium text-slate-700">
-                                                        {expense.description}
+                                        {Array.from({ length: ITEMS_PER_PAGE - 1 }).map((_, i) => (
+                                            <tr key={`empty-${i}`} className="h-[52px] bg-transparent border-b border-slate-50 last:border-0" />
+                                        ))}
+                                    </>
+                                ) : (
+                                    <>
+                                        {paginatedExpenses.map(expense => (
+                                            <tr key={expense.id} className="h-[52px] border-b border-slate-100 last:border-0 bg-white hover:bg-slate-50/80 transition-colors group">
+                                                <td className="px-4">
+                                                    <span className="text-xs font-mono font-medium text-slate-500">
+                                                        {formatDate(expense.expense_date, false)}
                                                     </span>
                                                 </td>
-                                                <td className="px-5 py-3.5 text-center">
-                                                    <span className={cn(
-                                                        'inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider',
-                                                        expense.expense_type === 'recurring'
-                                                            ? 'bg-indigo-50 text-indigo-600'
-                                                            : 'bg-slate-100 text-slate-500'
-                                                    )}>
-                                                        {expense.expense_type === 'recurring' ? (
-                                                            <><Repeat className="h-3 w-3" /> Programado</>
-                                                        ) : (
-                                                            'Fijo'
-                                                        )}
+                                                <td className="px-4">
+                                                    <span className="text-xs font-semibold text-slate-600">
+                                                        {getGarageName(expense.garage_id, expense.custom_garage_name)}
                                                     </span>
                                                 </td>
-                                                <td className="px-5 py-3.5 text-right">
-                                                    <span className="font-mono font-bold text-slate-800 text-sm bg-slate-50 group-hover:bg-white px-2 py-1 rounded-lg transition-colors">
+                                                <td className="px-4">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600">
+                                                        <ClipboardList className="w-3 h-3" />
+                                                        {expense.imputation || '—'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4">
+                                                    <span className="text-sm text-slate-500">
+                                                        {expense.description || '—'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 text-right">
+                                                    <span className="font-mono font-bold text-rose-600/90 text-sm bg-rose-50/50 group-hover:bg-rose-50 px-2 py-0.5 rounded-lg transition-colors inline-block">
                                                         -{formatCurrency(expense.amount)}
                                                     </span>
                                                 </td>
                                             </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                        ))}
+                                        {emptyRowsCount > 0 && Array.from({ length: emptyRowsCount }).map((_, i) => (
+                                            <tr key={`empty-${i}`} className="h-[52px] bg-transparent border-b border-slate-50 last:border-0" />
+                                        ))}
+                                    </>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* ── Footer: count + pagination ── */}
+                    <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                        <span className="text-xs text-slate-400">
+                            {filteredExpenses.length} {filteredExpenses.length === 1 ? 'egreso' : 'egresos'}
+                        </span>
+                        {totalPages > 1 && (
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    className={cn("p-1 rounded-md transition-colors", currentPage === 1 ? "text-slate-300 cursor-not-allowed" : "text-slate-500 hover:bg-slate-100")}
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <span className="text-xs font-medium text-slate-500 tabular-nums px-2">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                    className={cn("p-1 rounded-md transition-colors", currentPage === totalPages ? "text-slate-300 cursor-not-allowed" : "text-slate-500 hover:bg-slate-100")}
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
 
             {/* ═══════════════════════════════════════════════════════════
-                §3 — Active Scheduled Expenses
+                MODAL — Registrar Egreso
                ═══════════════════════════════════════════════════════════ */}
-            <div className="mt-6 bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
-                            <Calendar className="h-4 w-4" />
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+
+                        {/* Modal Header */}
+                        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-slate-800 text-white">
+                                    <Plus className="h-4 w-4" />
+                                </div>
+                                Registrar Egreso
+                            </h2>
+                            <button
+                                onClick={() => setIsModalOpen(false)}
+                                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
                         </div>
-                        <div>
-                            <h3 className="text-base font-bold text-slate-800">Egresos Programados Activos</h3>
-                            <p className="text-xs text-slate-400">Plantillas de gasto automático</p>
-                        </div>
+
+                        {/* Modal Body — Form */}
+                        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+
+                            {successMessage && (
+                                <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 font-medium animate-in fade-in duration-200">
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                                    {successMessage}
+                                </div>
+                            )}
+
+                            {/* 1. Garaje Asignado */}
+                            <div>
+                                <label className={labelClasses}>Garaje Asignado</label>
+                                <div className="flex gap-2">
+                                    <select
+                                        value={formGarageId}
+                                        onChange={e => { setFormGarageId(e.target.value); if (formErrors.garageId) setFormErrors(prev => ({ ...prev, garageId: false })); }}
+                                        className={cn(
+                                            getInputClass(formErrors.garageId),
+                                            formGarageId === OTHER_GARAGE_VALUE ? 'w-1/2' : 'w-full'
+                                        )}
+                                    >
+                                        <option value="" disabled hidden>Seleccionar garaje…</option>
+                                        {garages.map(g => (
+                                            <option key={g.id} value={g.id}>{g.name}</option>
+                                        ))}
+                                        <option value={OTHER_GARAGE_VALUE}>Otro</option>
+                                    </select>
+                                    {formGarageId === OTHER_GARAGE_VALUE && (
+                                        <input
+                                            type="text"
+                                            value={formCustomGarageName}
+                                            onChange={e => setFormCustomGarageName(e.target.value)}
+                                            placeholder="Nombre de la sucursal"
+                                            className={cn(getInputClass(), 'w-1/2 animate-in fade-in slide-in-from-left-2 duration-200')}
+                                        />
+                                    )}
+                                </div>
+                                {formErrors.garageId && <p className="text-[11px] text-red-500 mt-1 font-medium">Este campo es obligatorio</p>}
+                            </div>
+
+                            {/* 2. Fecha */}
+                            <div>
+                                <label className={labelClasses}>Fecha</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <Calendar className="h-4 w-4 text-slate-400" />
+                                    </div>
+                                    <input
+                                        type="date"
+                                        value={formDate}
+                                        onChange={e => setFormDate(e.target.value)}
+                                        max={todayStr}
+                                        className={cn(getInputClass(), 'pl-9')}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* 3. Imputación */}
+                            <div>
+                                <label className={labelClasses}>Imputación</label>
+                                <select
+                                    value={formImputation}
+                                    onChange={e => { setFormImputation(e.target.value); if (formErrors.imputation) setFormErrors(prev => ({ ...prev, imputation: false })); }}
+                                    className={getInputClass(formErrors.imputation)}
+                                >
+                                    <option value="">Seleccionar imputación…</option>
+                                    {IMPUTATION_OPTIONS.map(opt => (
+                                        <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                </select>
+                                {formErrors.imputation && <p className="text-[11px] text-red-500 mt-1 font-medium">Seleccione una imputación</p>}
+                            </div>
+
+                            {/* 4. Observaciones (Opcional) */}
+                            <div>
+                                <label className={labelClasses}>
+                                    Observaciones <span className="text-slate-300 font-normal normal-case">(opcional)</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={formDescription}
+                                    onChange={e => setFormDescription(e.target.value)}
+                                    placeholder="Detalle adicional..."
+                                    className={getInputClass()}
+                                />
+                            </div>
+
+                            {/* 5. Importe */}
+                            <div>
+                                <label className={labelClasses}>Importe</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                                        <span className="text-slate-400 font-bold text-sm">$</span>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={formAmountStr}
+                                        onChange={handleAmountChange}
+                                        placeholder="0"
+                                        className={cn(getInputClass(formErrors.amount), 'pl-8 font-mono font-medium')}
+                                    />
+                                </div>
+                                {formErrors.amount && <p className="text-[11px] text-red-500 mt-1 font-medium">Ingrese un importe válido</p>}
+                            </div>
+
+                            {/* Submit */}
+                            <div className="pt-2">
+                                <button
+                                    type="submit"
+                                    disabled={saving}
+                                    className={cn(
+                                        'w-full py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2',
+                                        saving
+                                            ? 'bg-slate-100 text-slate-400 cursor-wait'
+                                            : 'bg-slate-800 text-white hover:bg-slate-900 shadow-md shadow-slate-200'
+                                    )}
+                                >
+                                    {saving ? (
+                                        <>
+                                            <div className="h-4 w-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                                            Registrando…
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Plus className="w-4 h-4" />
+                                            Registrar Egreso
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-                
-                <div className="p-5">
-                    {filteredTemplates.length === 0 ? (
-                        <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
-                            <div className="h-10 w-10 rounded-full bg-slate-50 flex items-center justify-center mb-1">
-                                <Calendar className="h-5 w-5 text-slate-300" />
-                            </div>
-                            <p className="text-sm font-medium text-slate-400">No hay egresos programados activos</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {filteredTemplates.map(template => (
-                                <div key={template.id} className="flex flex-col bg-white border border-slate-200 rounded-xl p-4 transition-all hover:shadow-sm hover:border-slate-300 shadow-sm">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="min-w-0 pr-2">
-                                            <h4 className="font-semibold text-sm text-slate-800 truncate" title={template.description}>
-                                                {template.description}
-                                            </h4>
-                                            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                                                Día {template.recurrence_day} de cada mes
-                                            </p>
-                                        </div>
-                                        <button
-                                            onClick={() => handleRevokeTemplate(template.id)}
-                                            disabled={revokingId === template.id}
-                                            className="shrink-0 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                            title="Revocar"
-                                        >
-                                            {revokingId === template.id ? (
-                                                <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-                                            ) : (
-                                                <Trash2 className="h-4 w-4" />
-                                            )}
-                                        </button>
-                                    </div>
-                                    <div className="mt-auto pt-3 border-t border-slate-100 flex items-center justify-between">
-                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Monto</span>
-                                        <span className="font-mono font-bold text-slate-700 text-sm">{formatCurrency(template.amount)}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
+            )}
+        </>
     );
 }

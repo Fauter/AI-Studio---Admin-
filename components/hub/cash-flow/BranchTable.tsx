@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GitBranch, Building2, ChevronDown, ChevronRight } from 'lucide-react';
-import { cn, formatCurrency } from './CashFlowShared';
+import { cn, formatCurrency, formatDate, Expense } from './CashFlowShared';
 
 interface BranchBreakdown {
     id: string;
@@ -17,6 +17,7 @@ interface BranchBreakdown {
     monthlyExpenses: number;
     expenseCount: number;
     monthlyRevenue: number;
+    expenses: Expense[];
 }
 
 interface BranchTableProps {
@@ -58,7 +59,6 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
                         ) : (
                             branchBreakdown.map(branch => {
                                 const isExpanded = !!expandedBranches[branch.id];
-                                const margin = branch.monthlyRevenue - branch.monthlyExpenses;
                                 const hasExpenses = branch.monthlyExpenses > 0;
 
                                 return (
@@ -107,16 +107,10 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
                                                                 : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                                                             }
                                                             <span>
-                                                                Egresos Mes: <span className="font-semibold font-mono">{formatCurrency(branch.monthlyExpenses)}</span>
+                                                                Egresos Mes: <span className="font-semibold font-mono text-rose-500/90">{formatCurrency(branch.monthlyExpenses)}</span>
                                                                 {' '}<span className="text-slate-400">({branch.expenseCount} gastos)</span>
                                                             </span>
                                                         </button>
-                                                        <span className={cn(
-                                                            "text-[11px] font-semibold font-mono",
-                                                            margin >= 0 ? "text-emerald-600" : "text-red-600"
-                                                        )}>
-                                                            Margen: {formatCurrency(margin)}
-                                                        </span>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -124,9 +118,23 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
 
                                         {/* ── Expanded details ── */}
                                         {hasExpenses && isExpanded && (
-                                            <tr className="bg-slate-50/30 border-b border-slate-100">
-                                                <td colSpan={7} className="px-5 py-4 text-center text-xs text-slate-500">
-                                                    Se registraron <span className="font-semibold text-slate-700">{branch.expenseCount}</span> egresos este mes totalizando <span className="font-mono font-semibold text-slate-700">{formatCurrency(branch.monthlyExpenses)}</span>.
+                                            <tr className="bg-slate-50/40">
+                                                <td colSpan={7} className="px-5 py-4">
+                                                    <div className="flex flex-wrap gap-3">
+                                                        {[...branch.expenses]
+                                                            .sort((a, b) => new Date(a.expense_date).getTime() - new Date(b.expense_date).getTime())
+                                                            .map(exp => (
+                                                                <div key={exp.id} className="flex flex-col px-3 py-1.5 bg-white border border-slate-200/60 rounded-xl min-w-[160px] shadow-sm leading-tight">
+                                                                    <span className="text-[9px] text-slate-400 font-mono">
+                                                                        {formatDate(exp.expense_date).replace(',', '')} hs
+                                                                    </span>
+                                                                    <div className="flex items-center justify-between gap-3 text-[11px] text-slate-600">
+                                                                        <span className="truncate max-w-[160px] font-medium">{exp.description || exp.expense_type || 'Egreso'}</span>
+                                                                        <span className="font-mono font-medium text-rose-500/80">{formatCurrency(Number(exp.amount))}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         )}

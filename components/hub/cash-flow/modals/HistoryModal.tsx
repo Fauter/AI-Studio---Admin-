@@ -1,14 +1,15 @@
 import React from 'react';
-import { X, TrendingUp, Calendar } from 'lucide-react';
+import { X, TrendingUp, Calendar, Loader2 } from 'lucide-react';
 import { cn, formatCurrency, VariationBadge } from '../CashFlowShared';
 
 interface HistoryModalProps {
     isOpen: boolean;
     onClose: () => void;
     monthlyHistory: { label: string; total: number; variation: number; isOldest: boolean }[];
+    loading?: boolean;
 }
 
-export default function HistoryModal({ isOpen, onClose, monthlyHistory }: HistoryModalProps) {
+export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading }: HistoryModalProps) {
     if (!isOpen) return null;
 
     return (
@@ -34,7 +35,12 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory }: Histor
                 </div>
                 {/* Content */}
                 <div className="overflow-auto flex-1 px-6 py-3">
-                    {monthlyHistory.length === 0 ? (
+                    {loading ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-3">
+                            <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                            <p className="text-sm font-medium text-slate-600">Cargando datos históricos completos...</p>
+                        </div>
+                    ) : monthlyHistory.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
                             <Calendar className="h-8 w-8 opacity-20" />
                             <p className="text-xs">Sin datos históricos</p>

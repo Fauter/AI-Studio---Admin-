@@ -13,7 +13,7 @@ interface MovementsTableProps {
     uniqueVehicleTypes: string[];
     vehicleTypesMap: Record<string, string>;
     staysLookup: Record<string, Stay>;
-    getGarageName: (id: string) => string;
+    getGarageName: (id: string | null, customName?: string | null) => string;
     GarageFilter: React.ReactNode;
 }
 

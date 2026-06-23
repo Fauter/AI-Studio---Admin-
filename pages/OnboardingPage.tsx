@@ -560,27 +560,52 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
 // --- GARAGE SELECTOR SECTION ---
 const GarageSelectorSection = ({ garages, onRefresh }: { garages: Garage[], onRefresh: () => void }) => {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, shadowUser } = useAuth();
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
   const [formData, setFormData] = useState({ name: '', address: '', cuit: '' });
   const [submitting, setSubmitting] = useState(false);
 
-  const isOwner = profile?.role === UserRole.OWNER;
+  // Pilar 1: OWNER y MANAGER pueden crear garajes; ADMINISTRATIVE y OPERATOR no.
+  const canCreateGarage =
+    profile?.role === UserRole.OWNER ||
+    shadowUser?.role === UserRole.MANAGER;
 
   const handleCreateGarage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.from('garages').insert({
-        owner_id: user.id, name: formData.name, address: formData.address, cuit: formData.cuit
-      }).select().single();
-      if (error) throw error;
+      let newGarageId: string;
 
-      await supabase.from('building_configs').insert({ garage_id: data.id });
-      await supabase.from('financial_configs').insert({ garage_id: data.id });
+      // --- Rama MANAGER: RPC atómico (shadow user sin auth.uid()) ---
+      if (shadowUser?.role === UserRole.MANAGER && shadowUser.owner_id) {
+        const { data, error } = await supabase.rpc('create_garage_for_manager', {
+          p_employee_id: shadowUser.id,
+          p_owner_id: shadowUser.owner_id,
+          p_name: formData.name.trim(),
+          p_address: formData.address.trim(),
+          p_cuit: formData.cuit.trim()
+        });
+        if (error) throw error;
+        if (!data?.id) throw new Error('El servidor no retornó el garaje creado.');
+        newGarageId = data.id;
+
+      // --- Rama OWNER: INSERT directo (tiene auth.uid() válido para RLS) ---
+      } else if (user) {
+        const { data, error } = await supabase.from('garages').insert({
+          owner_id: user.id, name: formData.name.trim(), address: formData.address.trim(), cuit: formData.cuit.trim()
+        }).select().single();
+        if (error) throw error;
+
+        await supabase.from('building_configs').insert({ garage_id: data.id });
+        await supabase.from('financial_configs').insert({ garage_id: data.id });
+        newGarageId = data.id;
+
+      } else {
+        throw new Error('Sesión inválida. Vuelve a iniciar sesión.');
+      }
+
       onRefresh();
-      navigate(`/${data.id}/dashboard`, { replace: true });
+      navigate(`/${newGarageId}/dashboard`, { replace: true });
     } catch (err: any) {
       alert('Error: ' + err.message);
     } finally {
@@ -624,8 +649,8 @@ const GarageSelectorSection = ({ garages, onRefresh }: { garages: Garage[], onRe
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
       <SectionHeader title="Red de Garajes" icon={Building2} iconColor="blue" />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Create Card - Only for Owners */}
-        {isOwner && (
+        {/* Create Card - Visible for OWNER and MANAGER */}
+        {canCreateGarage && (
           <div onClick={() => setViewMode('create')} className="group flex flex-col items-center justify-center min-h-[200px] border-2 border-dashed border-slate-300 rounded-2xl p-6 cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all">
             <div className="p-4 bg-slate-100 rounded-full group-hover:bg-blue-100 transition-colors mb-4">
               <Plus className="h-8 w-8 text-slate-400 group-hover:text-blue-600" />
@@ -732,7 +757,7 @@ export default function OnboardingPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchGarages(); }, [user, shadowUser, authLoading]);
+  useEffect(() => { fetchGarages(); }, [user?.id, shadowUser?.id, authLoading]);
 
   // Auto-switch tab if current one is not allowed
   useEffect(() => {
