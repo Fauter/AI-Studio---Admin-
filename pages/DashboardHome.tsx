@@ -38,6 +38,7 @@ interface Movement {
     ticket_code?: string;
     invoice_type?: string;
     notes?: string;
+    related_entity_id?: string;
 }
 
 interface Stay {
@@ -155,6 +156,123 @@ const applyDateMask = (raw: string): string => {
     return cleaned.slice(0, 5);
 };
 
+// ─── Vehicle Type Resolution Helpers ─────────────────────────────────
+const typeCache = new Map<string, string>(); // Module-level cache for the session
+
+const normalizePlate = (plate?: string | null): string => {
+    if (!plate) return '';
+    return plate.trim().toUpperCase();
+};
+
+const resolveVehicleTypes = async (moves: Movement[], gId: string) => {
+    const missingStayIds = new Set<string>();
+    const missingPlates = new Set<string>();
+    
+    // First pass: identify missing stay types
+    moves.forEach(m => {
+        if (m.type === 'CobroEstadia' && m.related_entity_id) {
+            if (!typeCache.has(`stay:${m.related_entity_id}`)) {
+                missingStayIds.add(m.related_entity_id);
+            }
+        }
+    });
+
+    // Fetch missing stays in parallel batches
+    if (missingStayIds.size > 0) {
+        const stayIdArray = Array.from(missingStayIds);
+        const stayPromises = [];
+        for (let i = 0; i < stayIdArray.length; i += 200) {
+            const chunk = stayIdArray.slice(i, i + 200);
+            stayPromises.push(
+                supabase.from('stays').select('id, vehicle_type').in('id', chunk)
+            );
+        }
+        const stayResults = await Promise.all(stayPromises);
+        const foundStayIds = new Set<string>();
+        stayResults.forEach(({ data, error }) => {
+            if (error) console.error('[DashboardHome] Error fetching stays for types:', error);
+            if (data) {
+                data.forEach(s => {
+                    foundStayIds.add(s.id);
+                    if (s.vehicle_type) typeCache.set(`stay:${s.id}`, s.vehicle_type);
+                });
+            }
+        });
+        // Cache misses to avoid re-querying
+        missingStayIds.forEach(id => {
+            if (!foundStayIds.has(id)) {
+                typeCache.set(`stay:${id}`, '');
+            }
+        });
+    }
+
+    // Second pass: identify missing fallback plates
+    moves.forEach(m => {
+        let resolved = false;
+        if (m.type === 'CobroEstadia' && m.related_entity_id && typeCache.get(`stay:${m.related_entity_id}`)) {
+            resolved = true;
+        }
+        
+        if (!resolved && m.plate) {
+            const nPlate = normalizePlate(m.plate);
+            if (!typeCache.has(`plate:${gId}:${nPlate}`)) {
+                missingPlates.add(nPlate);
+            }
+        }
+    });
+
+    // Fetch missing vehicles in parallel batches
+    if (missingPlates.size > 0) {
+        const plateArray = Array.from(missingPlates);
+        const platePromises = [];
+        for (let i = 0; i < plateArray.length; i += 200) {
+            const chunk = plateArray.slice(i, i + 200);
+            platePromises.push(
+                supabase.from('vehicles').select('plate, type, updated_at').eq('garage_id', gId).in('plate', chunk)
+            );
+        }
+        const plateResults = await Promise.all(platePromises);
+        let allFetchedVehicles: any[] = [];
+        plateResults.forEach(({ data, error }) => {
+            if (error) console.error('[DashboardHome] Error fetching vehicles for types:', error);
+            if (data) allFetchedVehicles = allFetchedVehicles.concat(data);
+        });
+        
+        // Sort to ensure the most recently updated vehicle takes precedence
+        allFetchedVehicles.sort((a, b) => new Date(a.updated_at || 0).getTime() - new Date(b.updated_at || 0).getTime());
+        allFetchedVehicles.forEach(v => {
+            if (v.plate && v.type) {
+                typeCache.set(`plate:${gId}:${normalizePlate(v.plate)}`, v.type);
+            }
+        });
+        
+        // Cache misses
+        missingPlates.forEach(p => {
+            const key = `plate:${gId}:${p}`;
+            if (!typeCache.has(key)) {
+                typeCache.set(key, ''); 
+            }
+        });
+    }
+
+    // Third pass: build the result map for this specific render
+    const resultMap: Record<string, string> = {};
+    moves.forEach(m => {
+        let vType = '';
+        if (m.type === 'CobroEstadia' && m.related_entity_id && typeCache.has(`stay:${m.related_entity_id}`)) {
+            vType = typeCache.get(`stay:${m.related_entity_id}`)!;
+        }
+        if (!vType && m.plate) {
+            vType = typeCache.get(`plate:${gId}:${normalizePlate(m.plate)}`) || '';
+        }
+        if (vType) {
+            resultMap[m.id] = vType;
+        }
+    });
+    
+    return resultMap;
+};
+
 // ─── useDebounce Hook ──────────────────────────────────────────────
 function useDebounce(value: string, delay: number) {
     const [debounced, setDebounced] = useState(value);
@@ -193,7 +311,8 @@ export default function DashboardHome() {
     // ── Data state ──
     const [movements, setMovements] = useState<Movement[]>([]);
     const [stays, setStays] = useState<Stay[]>([]);
-    const [vehicleMap, setVehicleMap] = useState<Record<string, string>>({});
+    const [movementTypeMap, setMovementTypeMap] = useState<Record<string, string>>({});
+    const [movementTotalCount, setMovementTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [garageInfo, setGarageInfo] = useState<{ name: string; address: string } | null>(null);
     const [activeTab, setActiveTab] = useState<'movements' | 'stays'>('movements');
@@ -214,65 +333,76 @@ export default function DashboardHome() {
     // ── Data fetching ──
     useEffect(() => {
         if (!garageId) return;
+        let cancelled = false;
 
-        const fetchData = async () => {
-            setLoading(true);
+        const fetchData = async (isBackgroundRefresh = false) => {
+            if (!isBackgroundRefresh) {
+                setLoading(true);
+            }
             try {
-                const { data: gData } = await supabase
-                    .from('garages')
-                    .select('name, address')
-                    .eq('id', garageId)
-                    .single();
+                const [
+                    { data: gData },
+                    { data: movesData },
+                    { count: movesCount },
+                    { data: activeStaysData },
+                    { data: recentStaysData }
+                ] = await Promise.all([
+                    supabase.from('garages').select('name, address').eq('id', garageId).single(),
+                    supabase.from('movements').select('*').eq('garage_id', garageId).order('timestamp', { ascending: false }).limit(1500),
+                    supabase.from('movements').select('id', { count: 'exact', head: true }).eq('garage_id', garageId),
+                    supabase.from('stays').select('*').eq('garage_id', garageId).eq('active', true).order('entry_time', { ascending: false }),
+                    supabase.from('stays').select('*').eq('garage_id', garageId).order('entry_time', { ascending: false }).limit(200)
+                ]);
+
+                if (cancelled) return;
+
+                const activeStays = (activeStaysData as Stay[]) || [];
+                const recentStays = (recentStaysData as Stay[]) || [];
+
+                // Pre-warm cache with loaded stays
+                activeStays.forEach(s => { if (s.vehicle_type) typeCache.set(`stay:${s.id}`, s.vehicle_type); });
+                recentStays.forEach(s => { if (s.vehicle_type) typeCache.set(`stay:${s.id}`, s.vehicle_type); });
+
+                let map: Record<string, string> = {};
+                let moves: Movement[] = [];
+
+                if (movesData) {
+                    moves = movesData as Movement[];
+                    try {
+                        map = await resolveVehicleTypes(moves, garageId);
+                    } catch (err) {
+                        console.error('[DashboardHome] Failed to resolve movement vehicle types', err);
+                    }
+                }
+
+                if (cancelled) return;
+
+                // Atomic state update
                 if (gData) setGarageInfo(gData);
-
-                const { data: movesData } = await supabase
-                    .from('movements')
-                    .select('*')
-                    .eq('garage_id', garageId)
-                    .order('timestamp', { ascending: false })
-                    .limit(1500);
-
-                const { data: activeStaysData } = await supabase
-                    .from('stays')
-                    .select('*')
-                    .eq('garage_id', garageId)
-                    .eq('active', true)
-                    .order('entry_time', { ascending: false });
-
-                const { data: recentStaysData } = await supabase
-                    .from('stays')
-                    .select('*')
-                    .eq('garage_id', garageId)
-                    .order('entry_time', { ascending: false })
-                    .limit(200);
-
-                if (movesData) setMovements(movesData as Movement[]);
+                if (movesCount !== null) setMovementTotalCount(movesCount);
 
                 const staysMap = new Map<string, Stay>();
-                if (recentStaysData) recentStaysData.forEach(s => staysMap.set(s.id, s as Stay));
-                if (activeStaysData) activeStaysData.forEach(s => staysMap.set(s.id, s as Stay));
+                recentStays.forEach(s => staysMap.set(s.id, s));
+                activeStays.forEach(s => staysMap.set(s.id, s));
                 setStays(Array.from(staysMap.values()));
 
-                const { data: vData } = await supabase
-                    .from('vehicles')
-                    .select('plate, type')
-                    .eq('garage_id', garageId);
-
-                if (vData) {
-                    const vMap: Record<string, string> = {};
-                    vData.forEach(v => { if (v.plate) vMap[v.plate] = v.type; });
-                    setVehicleMap(vMap);
-                }
+                setMovementTypeMap(map);
+                setMovements(moves);
             } catch (error) {
                 console.error("Error fetching dashboard data:", error);
             } finally {
-                setLoading(false);
+                if (!cancelled && !isBackgroundRefresh) {
+                    setLoading(false);
+                }
             }
         };
 
-        fetchData();
-        const interval = setInterval(fetchData, 60000);
-        return () => clearInterval(interval);
+        fetchData(false);
+        const interval = setInterval(() => fetchData(true), 60000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
     }, [garageId]);
 
     // ── Derived (global, unfiltered for KPIs) ──
@@ -301,13 +431,18 @@ export default function DashboardHome() {
         return Array.from(set).sort();
     }, [activeStays]);
 
+    const getMovementVehicleType = useCallback((move: Movement) => {
+        if (movementTypeMap[move.id]) return movementTypeMap[move.id];
+        return move.plate ? 'VEHÍCULO' : move.type;
+    }, [movementTypeMap]);
+
     const movVehicleTypeOptions = useMemo(() => {
         const set = new Set<string>();
         movements.forEach(m => {
-            if (m.plate && vehicleMap[m.plate]) set.add(vehicleMap[m.plate]);
+            if (movementTypeMap[m.id]) set.add(movementTypeMap[m.id]);
         });
         return Array.from(set).sort();
-    }, [movements, vehicleMap]);
+    }, [movements, movementTypeMap]);
 
     // ── Filtered lists ──
     const filteredMovements = useMemo(() => {
@@ -331,7 +466,7 @@ export default function DashboardHome() {
             list = list.filter(m => (m.plate || '').toUpperCase().includes(q));
         }
         if (movFilters.vehicleType) {
-            list = list.filter(m => m.plate && vehicleMap[m.plate] === movFilters.vehicleType);
+            list = list.filter(m => movementTypeMap[m.id] === movFilters.vehicleType);
         }
         if (movFilters.tariffType) {
             list = list.filter(m => m.type === movFilters.tariffType);
@@ -351,7 +486,7 @@ export default function DashboardHome() {
             if (!isNaN(max)) list = list.filter(m => (Number(m.amount) || 0) <= max);
         }
         return list;
-    }, [movements, movFilters.dateFrom, movFilters.dateTo, debouncedMovPlate, movFilters.vehicleType, movFilters.tariffType, movFilters.operator, movFilters.method, movFilters.amountMin, movFilters.amountMax, vehicleMap]);
+    }, [movements, movFilters.dateFrom, movFilters.dateTo, debouncedMovPlate, movFilters.vehicleType, movFilters.tariffType, movFilters.operator, movFilters.method, movFilters.amountMin, movFilters.amountMax, movementTypeMap]);
 
     const totalPages = Math.max(1, Math.ceil(filteredMovements.length / PAGE_SIZE));
     const safePage = Math.min(movPage, totalPages);
@@ -530,7 +665,7 @@ export default function DashboardHome() {
             const rowValues = [
                 new Date(m.timestamp),
                 m.plate || '',
-                m.plate ? (vehicleMap[m.plate] || '') : m.type,
+                getMovementVehicleType(m),
                 m.operator || m.operator_name || 'Sistema',
                 m.payment_method || '',
                 m.invoice_type || '',
@@ -566,7 +701,7 @@ export default function DashboardHome() {
         // ── Save File ──
         const buffer = await wb.xlsx.writeBuffer();
         saveAs(new Blob([buffer]), `movimientos_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    }, [filteredMovements, vehicleMap, garageInfo, printFiltersText]);
+    }, [filteredMovements, getMovementVehicleType, garageInfo, printFiltersText]);
 
     const isHighDensity = filteredMovements.length > 50;
 
@@ -599,6 +734,10 @@ export default function DashboardHome() {
     // ═════════════════════════════════════════════════════════════════
     // RENDER
     // ═════════════════════════════════════════════════════════════════
+    const movementBadgeValue = Boolean(movFiltersActive)
+        ? filteredMovements.length
+        : movementTotalCount > 1000 ? '+1000' : movementTotalCount;
+
     return (
         <>
             <div className="px-1 py-2 space-y-2 max-w-[1600px] mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500 print:hidden">
@@ -637,7 +776,7 @@ export default function DashboardHome() {
                                 "py-0.5 px-1.5 rounded-full text-[9px] font-bold",
                                 activeTab === 'movements' ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-500"
                             )}>
-                                {filteredMovements.length}
+                                {movementBadgeValue}
                             </span>
                         </button>
                         <button
@@ -801,15 +940,21 @@ export default function DashboardHome() {
                                                 </td>
                                             </tr>
                                         ) : (
-                                            paginatedMovements.map(move => (
+                                            paginatedMovements.map(move => {
+                                                const vType = getMovementVehicleType(move);
+                                                const isLongType = vType.length > 16;
+                                                return (
                                                 <React.Fragment key={move.id}>
 
 <tr className="md:hidden block border-b border-slate-100 p-3 hover:bg-indigo-50/30 transition-colors">
     <td className="block w-full">
         <div className="flex justify-between items-start mb-2">
-            <div className="flex flex-col">
+            <div className="flex flex-col max-w-[65%]">
                 <span className="font-bold text-slate-800 font-mono text-[14px]">{move.plate || '---'}</span>
-                <span className="text-[10px] uppercase text-indigo-600 font-medium">{move.plate ? (vehicleMap[move.plate] || 'Vehículo') : move.type}</span>
+                <span className={cn(
+                    "uppercase text-indigo-600 font-medium mt-0.5",
+                    isLongType ? "text-[9px] leading-[0.95]" : "text-[10px] leading-[1.1]"
+                )}>{vType}</span>
             </div>
             <div className="text-right">
                 <div className="font-bold text-slate-900 font-mono text-sm">{formatCurrency(move.amount)}</div>
@@ -844,10 +989,13 @@ export default function DashboardHome() {
                                                         <span className="font-semibold text-slate-700">{formatTime24(move.timestamp)}</span>
                                                         <span className="block text-[9px] text-slate-400">{formatDateDM(move.timestamp)}</span>
                                                     </td>
-                                                    <td className="px-2 py-2">
+                                                    <td className="px-2 py-2 min-w-[120px] max-w-[160px]">
                                                         <div className="font-bold text-slate-800 font-mono text-[13px]">{move.plate || '---'}</div>
-                                                        <div className="text-[9px] uppercase text-indigo-600 font-medium">
-                                                            {move.plate ? (vehicleMap[move.plate] || 'Vehículo') : move.type}
+                                                        <div className={cn(
+                                                            "uppercase text-indigo-600 font-medium mt-0.5",
+                                                            isLongType ? "text-[8.5px] leading-[0.95]" : "text-[9px] leading-[1.05]"
+                                                        )}>
+                                                            {vType}
                                                         </div>
                                                     </td>
                                                     <td className="px-2 py-2">
@@ -895,7 +1043,8 @@ export default function DashboardHome() {
                                                     </td>
                                                 </tr>
 </React.Fragment>
-                                            ))
+                                                );
+                                            })
                                         )}
                                     </tbody>
                                 </table>
@@ -1138,7 +1287,7 @@ export default function DashboardHome() {
                                             <tr key={m.id} className="border-b border-slate-200">
                                                 <td className={`${tdPadding} whitespace-nowrap`}>{formatDateDM(m.timestamp)} {formatTime24(m.timestamp)}</td>
                                                 <td className={`${tdPadding} font-mono`}>{m.plate || '---'}</td>
-                                                <td className={`${tdPadding} text-[9px] uppercase`}>{m.plate ? (vehicleMap[m.plate] || 'Vehículo') : m.type}</td>
+                                                <td className={`${tdPadding} text-[9px] uppercase`}>{getMovementVehicleType(m)}</td>
                                                 <td className={`${tdPadding}`}>{m.operator || m.operator_name || 'Sistema'}</td>
                                                 <td className={`${tdPadding}`}>{m.payment_method || '---'}</td>
                                                 <td className={`${tdPadding} text-[9px] uppercase`}>{m.invoice_type || '---'}</td>
