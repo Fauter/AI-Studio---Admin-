@@ -22,7 +22,6 @@ import {
     Expense,
     UnifiedTransaction
 } from './cash-flow/CashFlowShared';
-import { usePeakStays } from './cash-flow/usePeakStays';
 import KpiGrid from './cash-flow/KpiGrid';
 import ChartsSection from './cash-flow/ChartsSection';
 import BranchTable from './cash-flow/BranchTable';
@@ -49,7 +48,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const { profile } = useAuth();
     const [activeSection, setActiveSection] = useState<ActiveSection>('resumen');
     const [peakMode, setPeakMode] = useState<PeakMode>('occupancy');
-    const [peakPeriod, setPeakPeriod] = useState<any>('30_days');
+    const [peakPeriod, setPeakPeriod] = useState<any>('last_30_days');
     const [historicalChartView, setHistoricalChartView] = useState<any>('historical');
     const [selectedGarageId, setSelectedGarageId] = useState<string>('all');
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -564,17 +563,49 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         return { data, maxVal };
     }, [gMovements]);
 
-    const activeGarageIds = useMemo(() => {
-        if (selectedGarageId === 'all') return garages.map(g => g.id);
-        return [selectedGarageId];
-    }, [garages, selectedGarageId]);
+    const peakHoursData = useMemo(() => {
+        const histogram = new Array(24).fill(0);
+        const { inicioHoy, inicioManana, now } = getArgentinaDateAnchors();
+        const hoyMs = inicioHoy.getTime();
+        const mananaMs = inicioManana.getTime();
 
-    const { data: peakHoursData, labels: peakHoursLabels, loadingPeakStays } = usePeakStays(
-        activeGarageIds,
-        peakPeriod,
-        historicalChartView,
-        peakMode
-    );
+        gAllStays.forEach(stay => {
+            if (!stay.entry_time) return;
+            const entryDate = new Date(stay.entry_time);
+            const entryMs = entryDate.getTime();
+
+            // Determine exit: if active (still inside), use "now"
+            const exitDate = (stay.active || !stay.exit_time) ? now : new Date(stay.exit_time);
+            const exitMs = exitDate.getTime();
+
+            if (peakMode === 'occupancy') {
+                // Skip stays that ended before today or started after today
+                if (exitMs < hoyMs || entryMs >= mananaMs) return;
+
+                // Clamp entry/exit to today's window for hour iteration
+                const effectiveEntry = entryMs < hoyMs ? inicioHoy : entryDate;
+                const effectiveExit = exitMs >= mananaMs ? new Date(inicioHoy.getFullYear(), inicioHoy.getMonth(), inicioHoy.getDate(), 23, 59, 59) : exitDate;
+
+                const startHour = effectiveEntry.getHours();
+                const endHour = effectiveExit.getHours();
+
+                for (let h = startHour; h <= Math.min(endHour, 23); h++) {
+                    histogram[h]++;
+                }
+            } else if (peakMode === 'entries') {
+                if (entryMs >= hoyMs && entryMs < mananaMs) {
+                    histogram[entryDate.getHours()]++;
+                }
+            } else if (peakMode === 'exits') {
+                if (!stay.active && stay.exit_time) {
+                    if (exitMs >= hoyMs && exitMs < mananaMs) {
+                        histogram[exitDate.getHours()]++;
+                    }
+                }
+            }
+        });
+        return histogram;
+    }, [gAllStays, peakMode]);
 
     const branchBreakdown = useMemo(() => {
         const { inicioHoy, inicioManana } = getArgentinaDateAnchors();
@@ -808,14 +839,12 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                         <ChartsSection
                             revenueChartData={revenueChartData}
                             peakHoursData={peakHoursData}
-                            peakHoursLabels={peakHoursLabels}
                             peakMode={peakMode}
                             setPeakMode={setPeakMode}
                             peakPeriod={peakPeriod}
                             setPeakPeriod={setPeakPeriod}
                             historicalChartView={historicalChartView}
                             setHistoricalChartView={setHistoricalChartView}
-                            loadingPeakStays={loadingPeakStays}
                         />
                     </div>
                 )}
