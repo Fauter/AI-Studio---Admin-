@@ -160,13 +160,13 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             if (ts >= hoyMs && ts < mananaMs) todayTotal += amt;
             if (ts >= ayerMs && ts < hoyMs) yesterdayTotal += amt;
         });
-        storeExpenses?.forEach(e => {
-            const ts = new Date(e.created_at).getTime();
+        gExpenses?.forEach(e => {
+            const ts = new Date(e.timestamp).getTime();
             if (ts >= hoyMs && ts < mananaMs) expensesToday += Number(e.amount ?? 0);
         });
         const variation = yesterdayTotal === 0 ? (todayTotal > 0 ? 100 : 0) : ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100;
         return { today: todayTotal, yesterday: yesterdayTotal, variation: Math.round(variation), expenses: expensesToday };
-    }, [gMovements, storeExpenses]);
+    }, [gMovements, gExpenses]);
 
     const kpiFacturacion = useMemo(() => {
         const { inicioHoy } = getArgentinaDateAnchors();
@@ -185,16 +185,17 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             if (ts >= inicioMes && ts < inicioMesSiguiente) currentTotal += amt;
             else if (ts >= inicioMesAnterior && ts < inicioMes) prevTotal += amt;
         });
-        storeExpenses?.forEach(e => {
-            const ts = new Date(e.created_at).getTime();
+        gExpenses?.forEach(e => {
+            const ts = new Date(e.timestamp).getTime();
             if (ts >= inicioMes && ts < inicioMesSiguiente) expensesMonth += Number(e.amount || 0);
         });
         const variation = prevTotal === 0 ? (currentTotal > 0 ? 100 : 0) : ((currentTotal - prevTotal) / prevTotal) * 100;
         return { current: currentTotal, previous: prevTotal, variation: Math.round(variation), expenses: expensesMonth };
-    }, [gMovements, storeExpenses]);
+    }, [gMovements, gExpenses]);
 
     const monthlyHistory = useMemo(() => {
         const buckets: Record<string, number> = {};
+        const bucketsExpenses: Record<string, number> = {};
         const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
         gMovements.forEach(m => {
             if (!m.timestamp) return;
@@ -203,22 +204,36 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
             buckets[key] = (buckets[key] || 0) + Number(m.amount || 0);
         });
+        gExpenses?.forEach(e => {
+            const safeTs = typeof e.timestamp === 'string' ? e.timestamp.replace(' ', 'T') : e.timestamp;
+            const d = new Date(safeTs);
+            const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+            bucketsExpenses[key] = (bucketsExpenses[key] || 0) + Number(e.amount || 0);
+        });
+        
+        // Compute union of keys to not lose months with expenses but no movements
+        const allKeys = Array.from(new Set([...Object.keys(buckets), ...Object.keys(bucketsExpenses)]));
+
         // Sort keys ascending (chronological) for correct variation calculation
-        const chronoKeys = Object.keys(buckets).sort((a, b) => a.localeCompare(b));
+        const chronoKeys = allKeys.sort((a, b) => a.localeCompare(b));
         const withVariation = chronoKeys.map((key, idx) => {
             const [yearStr, monthStr] = key.split('-');
             const year = parseInt(yearStr, 10);
             const month = parseInt(monthStr, 10);
-            const total = buckets[key];
+            const total = buckets[key] || 0;
+            const expenses = bucketsExpenses[key] || 0;
+            
+            // Previous key must be found in chronological order for variation of INCOME.
             const prevKey = idx > 0 ? chronoKeys[idx - 1] : null;
-            const prevTotal = prevKey ? buckets[prevKey] : 0;
+            const prevTotal = prevKey ? (buckets[prevKey] || 0) : 0;
             const isOldest = idx === 0;
             const variation = isOldest ? 0 : (prevTotal === 0 ? (total > 0 ? 100 : 0) : Math.round(((total - prevTotal) / prevTotal) * 100));
-            return { label: `${MONTH_NAMES[month]} ${year}`, total, variation, isOldest };
+            
+            return { label: `${MONTH_NAMES[month]} ${year}`, total, expenses, variation, isOldest };
         });
         // Reverse for display: most recent first
         return withVariation.reverse();
-    }, [gMovements]);
+    }, [gMovements, gExpenses]);
 
     const dailyIncomeData = useMemo(() => {
         const { inicioHoy } = getArgentinaDateAnchors();
@@ -238,6 +253,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         const prevMonthStr = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}`;
 
         const dailyMap: Record<string, number> = {};
+        const dailyExpenseMap: Record<string, number> = {};
 
         gMovements.forEach(m => {
             if (!m.timestamp) return;
@@ -253,6 +269,15 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             }
         });
 
+        gExpenses?.forEach(e => {
+            const safeTs = typeof e.timestamp === 'string' ? e.timestamp.replace(' ', 'T') : e.timestamp;
+            const d = new Date(safeTs);
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if (dateStr.startsWith(targetMonthStr) || dateStr.startsWith(prevMonthStr)) {
+                dailyExpenseMap[dateStr] = (dailyExpenseMap[dateStr] || 0) + Number(e.amount || 0);
+            }
+        });
+
         const fullDays = [];
         const nowMs = inicioHoy.getTime();
 
@@ -264,11 +289,13 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             const padDayNum = prevLastDay - i + 1;
             const dateStr = `${prevMonthStr}-${String(padDayNum).padStart(2, '0')}`;
             const amount = dailyMap[dateStr] || 0;
+            const expenses = dailyExpenseMap[dateStr] || 0;
 
             fullDays.push({
                 fullDate: dateStr,
                 dayNum: padDayNum,
                 amount,
+                expenses,
                 variation: 0,
                 isFuture: false,
                 isPadding: true
@@ -284,6 +311,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             const dayKey = String(dayNum).padStart(2, '0');
             const dateStr = `${targetMonthStr}-${dayKey}`;
             const amount = dailyMap[dateStr] || 0;
+            const expenses = dailyExpenseMap[dateStr] || 0;
 
             const variation = previousAmount === 0 ? (amount > 0 ? 100 : 0) : Math.round(((amount - previousAmount) / previousAmount) * 100);
 
@@ -294,6 +322,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 fullDate: dateStr,
                 dayNum,
                 amount,
+                expenses,
                 variation,
                 isFuture,
                 isPadding: false
@@ -615,7 +644,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             // ── Egresos mensuales por sucursal ──
             const garageExpenses = storeExpenses.filter(e => {
                 if (e.garage_id !== g.id) return false;
-                const ts = new Date(e.created_at).getTime();
+                const ts = new Date(e.timestamp).getTime();
                 return ts >= inicioMes && ts < mananaMs;
             });
             const monthlyExpenses = garageExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);

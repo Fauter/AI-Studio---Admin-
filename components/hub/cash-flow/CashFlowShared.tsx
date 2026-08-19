@@ -90,6 +90,7 @@ export interface PartialClose {
     garage_id: string;
     operator: string;
     created_at: string;
+    timestamp: string;
     amount: number;
     movement_type: 'expense' | 'withdrawal';
     notes: string | null;

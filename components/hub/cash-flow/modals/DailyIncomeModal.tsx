@@ -6,6 +6,7 @@ interface DailyIncomeItem {
     fullDate: string;
     dayNum: number;
     amount: number;
+    expenses: number;
     variation: number;
     isFuture: boolean;
     isPadding: boolean;
@@ -102,8 +103,11 @@ export default function DailyIncomeModal({
 
                                                     {!day.isFuture && (
                                                         <>
-                                                            <span className="text-[9px] md:text-[12px] font-bold font-mono text-emerald-600 mb-0.5 md:mb-1.5">
+                                                            <span className="text-[9px] md:text-[12px] font-bold font-mono text-emerald-600 mb-0.5 md:mb-1">
                                                                 {formatCurrency(day.amount)}
+                                                            </span>
+                                                            <span className="text-[8px] md:text-[10px] font-medium text-rose-500/90 mb-0.5 md:mb-1.5 leading-tight text-center">
+                                                                Egresos: {formatCurrency(day.expenses ?? 0)}
                                                             </span>
                                                             {!day.isPadding && (
                                                                 day.variation !== 0 ? (

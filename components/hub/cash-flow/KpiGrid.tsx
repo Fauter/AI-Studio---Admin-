@@ -31,6 +31,9 @@ export default function KpiGrid({
     setIsOccupancyModalOpen,
     setIsSubscriptionsModalOpen
 }: KpiGridProps) {
+    const todayNet = kpiIngresos.today - (kpiIngresos.expenses ?? 0);
+    const monthNet = kpiFacturacion.current - (kpiFacturacion.expenses ?? 0);
+
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
             {/* Ingresos Hoy */}
@@ -45,7 +48,14 @@ export default function KpiGrid({
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Ingresos Hoy</p>
                 <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{formatCurrency(kpiIngresos.today)}</p>
-                <p className="text-[10px] text-slate-400 mt-1">Ayer: {formatCurrency(kpiIngresos.yesterday)}</p>
+                <p className="text-[9px] leading-tight text-slate-400 mt-0">Ayer: {formatCurrency(kpiIngresos.yesterday)}</p>
+                
+                <div className="mt-2 space-y-0.5">
+                    <p className="text-[10px] text-rose-500 font-medium">Egresos hoy: {formatCurrency(kpiIngresos.expenses ?? 0)}</p>
+                    <p className={cn("text-[10px] font-semibold", todayNet < 0 ? "text-rose-600" : "text-slate-600")}>
+                        Neto hoy: {formatCurrency(todayNet)}
+                    </p>
+                </div>
             </div>
             {/* Facturación Mes */}
             <div onClick={() => setIsHistoryModalOpen(true)}
@@ -56,7 +66,14 @@ export default function KpiGrid({
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Facturación Mes</p>
                 <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{formatCurrency(kpiFacturacion.current)}</p>
-                <p className="text-[10px] text-slate-400 mt-1">Anterior: {formatCurrency(kpiFacturacion.previous)}</p>
+                <p className="text-[9px] leading-tight text-slate-400 mt-0">Anterior: {formatCurrency(kpiFacturacion.previous)}</p>
+                
+                <div className="mt-2 space-y-0.5">
+                    <p className="text-[10px] text-rose-500 font-medium">Egresos mes: {formatCurrency(kpiFacturacion.expenses ?? 0)}</p>
+                    <p className={cn("text-[10px] font-semibold", monthNet < 0 ? "text-rose-600" : "text-slate-600")}>
+                        Neto mes: {formatCurrency(monthNet)}
+                    </p>
+                </div>
             </div>
             {/* Ocupación */}
             <div onClick={() => setIsOccupancyModalOpen(true)}

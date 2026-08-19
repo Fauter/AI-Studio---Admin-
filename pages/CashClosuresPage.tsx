@@ -7,6 +7,7 @@ import {
     CheckCircle2, Clock, History, ArrowDownCircle, ChevronRight, Calculator, ReceiptText, Plus, X
 } from 'lucide-react';
 import SectionHeader from '../components/hub/SectionHeader';
+import { PartialClose, getExpenseDisplayText } from '../components/hub/cash-flow/CashFlowShared';
 import { useAuth } from '../hooks/useAuth';
 import { formatDateTime24h } from '../lib/dateFormatters';
 
@@ -23,19 +24,6 @@ interface ShiftClose {
 }
 
 type PartialMovementType = 'withdrawal' | 'expense';
-
-interface PartialClose {
-    id: string;
-    garage_id: string;
-    created_at: string;
-    operator: string | null;
-    amount: number;
-    recipient_name: string | null;
-    notes: string | null;
-    movement_type: PartialMovementType | null;
-    is_withdrawn: boolean;
-    withdrawn_by_name: string | null;
-}
 
 interface Movement {
     id: string;
@@ -71,15 +59,6 @@ function sanitizeOptionalText(value: string | null | undefined): string | null {
     const trimmed = value.trim();
     if (trimmed === '' || trimmed.toLowerCase() === 'desconocido') return null;
     return trimmed;
-}
-
-function buildPartialCloseDetail(recipient: string | null | undefined, notes: string | null | undefined): string {
-    const r = sanitizeOptionalText(recipient);
-    const n = sanitizeOptionalText(notes);
-    if (r && n) return `${r} - ${n}`;
-    if (r) return r;
-    if (n) return n;
-    return '—';
 }
 
 const formatDate = formatDateTime24h;
@@ -348,7 +327,7 @@ export default function CashClosuresPage() {
                     withdrawn_by_name: p.withdrawn_by_name,
                     type: 'Retiro Parcial',
                     amount: p.amount,
-                    detail: buildPartialCloseDetail(p.recipient_name, p.notes),
+                    detail: getExpenseDisplayText(p.recipient_name, p.notes),
                 }
             });
         const combined = [...shifts, ...partials].filter(item => {
@@ -771,7 +750,7 @@ export default function CashClosuresPage() {
                                             <div>
                                                 <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Detalle</div>
                                                 <div className="text-sm font-medium text-slate-700">
-                                                    {buildPartialCloseDetail(partial.recipient_name, partial.notes)}
+                                                    {getExpenseDisplayText(partial.recipient_name, partial.notes)}
                                                 </div>
                                             </div>
                                             <div className="pt-2 border-t border-slate-50">
@@ -796,7 +775,7 @@ export default function CashClosuresPage() {
                                         </td>
                                         <td className="px-5 py-4">
                                             <div className="text-sm text-slate-700">
-                                                {buildPartialCloseDetail(partial.recipient_name, partial.notes)}
+                                                {getExpenseDisplayText(partial.recipient_name, partial.notes)}
                                             </div>
                                         </td>
                                         <td className="px-5 py-4 text-right font-black text-orange-600">
@@ -858,7 +837,7 @@ export default function CashClosuresPage() {
                                             <div>
                                                 <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Imputación / Observaciones</div>
                                                 <div className="text-sm font-medium text-slate-700">
-                                                    {buildPartialCloseDetail(row.recipient_name, row.notes)}
+                                                    {getExpenseDisplayText(row.recipient_name, row.notes)}
                                                 </div>
                                             </div>
                                         </td>
@@ -874,7 +853,7 @@ export default function CashClosuresPage() {
                                         </td>
                                         <td className="px-5 py-4">
                                             <div className="text-sm text-slate-700">
-                                                {buildPartialCloseDetail(row.recipient_name, row.notes)}
+                                                {getExpenseDisplayText(row.recipient_name, row.notes)}
                                             </div>
                                         </td>
                                         <td className="px-5 py-4 text-right font-black text-rose-600">

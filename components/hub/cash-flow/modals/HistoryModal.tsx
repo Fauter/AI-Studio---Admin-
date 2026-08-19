@@ -5,7 +5,7 @@ import { cn, formatCurrency, VariationBadge } from '../CashFlowShared';
 interface HistoryModalProps {
     isOpen: boolean;
     onClose: () => void;
-    monthlyHistory: { label: string; total: number; variation: number; isOldest: boolean }[];
+    monthlyHistory: { label: string; total: number; expenses: number; variation: number; isOldest: boolean }[];
     loading?: boolean;
 }
 
@@ -65,11 +65,16 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-3 shrink-0">
-                                        <span className={cn("text-sm font-bold font-mono tabular-nums",
-                                            i === 0 ? "text-indigo-800" : "text-slate-800"
-                                        )}>
-                                            {formatCurrency(entry.total)}
-                                        </span>
+                                        <div className="flex flex-col items-end justify-center">
+                                            <span className={cn("text-sm font-bold font-mono tabular-nums leading-none",
+                                                i === 0 ? "text-indigo-800" : "text-slate-800"
+                                            )}>
+                                                {formatCurrency(entry.total)}
+                                            </span>
+                                            <span className="text-[10px] font-medium text-rose-500/90 mt-1 leading-none">
+                                                Egresos: {formatCurrency(entry.expenses ?? 0)}
+                                            </span>
+                                        </div>
                                         {!entry.isOldest && <VariationBadge value={entry.variation} />}
                                     </div>
                                 </div>

@@ -208,7 +208,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
                 trackProgress(fetchVehicles(), 'Vehículos'),
                 trackProgress(retry(() => supabase.from('stays').select('*').in('garage_id', garageIds).eq('active', true).order('entry_time', { ascending: false })), 'Estadías Activas'),
                 trackProgress(retry(() => supabase.from('stays').select('id,garage_id,plate,entry_time,exit_time,vehicle_type,active').in('garage_id', garageIds).gte('entry_time', movementsSince).order('entry_time', { ascending: false }).limit(3000)), 'Histórico de Estadías'),
-                trackProgress(retry(() => supabase.from('partial_closes').select('*').eq('movement_type', 'expense').select('id, garage_id, owner_id, template_id, description, imputation, custom_garage_name, amount, expense_type, expense_date, created_at, created_by').in('garage_id', garageIds).gte('expense_date', movementsSince).order('expense_date', { ascending: false })), 'Egresos'),
+                trackProgress(retry(() => supabase.from('partial_closes').select('*').eq('movement_type', 'expense').in('garage_id', garageIds).gte('timestamp', movementsSince).order('timestamp', { ascending: false })), 'Egresos'),
                 trackProgress(fetchMovements(), 'Movimientos'),
                 trackProgress(fetchEmployees(), 'Operadores'),
                 trackProgress(fetchCustomers(), 'Clientes')
@@ -265,11 +265,11 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
             // Fetch historical expenses
             const historicalExpensesData = await retry(() => supabase
                 .from('partial_closes').select('*').eq('movement_type', 'expense')
-                .select('id, garage_id, owner_id, template_id, description, amount, expense_type, expense_date, created_at, created_by')
                 .in('garage_id', garageIds)
-                .gte('expense_date', firstDayOfYear)
-                .lt('expense_date', firstDayOfPrevMonth)
-                .order('expense_date', { ascending: false })
+                .gte('timestamp', firstDayOfYear)
+                .lt('timestamp', firstDayOfPrevMonth)
+                .order('timestamp', { ascending: false })
+                .limit(2000)
             );
 
             // Fetch historical stays (not usually needed for variation but good for completeness)

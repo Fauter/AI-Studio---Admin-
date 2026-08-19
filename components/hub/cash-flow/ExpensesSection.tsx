@@ -231,7 +231,7 @@ export default function ExpensesSection({
 
             if (error) throw error;
             if (data) {
-                const mappedExpense: PartialClose = { id: data.id, garage_id: data.garage_id, operator: data.operator, created_at: data.timestamp || data.created_at, amount: data.amount, movement_type: data.movement_type || 'expense', notes: data.notes || null, recipient_name: data.recipient_name || null, is_withdrawn: false, withdrawn_by_name: null };
+                const mappedExpense: PartialClose = { id: data.id, garage_id: data.garage_id, operator: data.operator, created_at: data.created_at || new Date().toISOString(), timestamp: data.timestamp || new Date().toISOString(), amount: data.amount, movement_type: data.movement_type || 'expense', notes: data.notes || null, recipient_name: data.recipient_name || null, is_withdrawn: false, withdrawn_by_name: null };
                 onPartialCloseCreated(mappedExpense);
                 showSuccess('Egreso registrado correctamente');
                 resetForm();
