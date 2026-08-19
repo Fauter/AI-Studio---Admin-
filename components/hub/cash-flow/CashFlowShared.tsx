@@ -245,6 +245,7 @@ export function getExpenseDisplayText(recipientName?: string | null, notes?: str
     let r = recipientName?.trim() || "";
     let n = notes?.trim() || "";
     if (r.toLowerCase() === "desconocido") r = "";
+    if (n.toLowerCase() === "desconocido") n = "";
     if (r && n) return r + " - " + n;
     if (r) return r;
     if (n) return n;

@@ -124,7 +124,7 @@ export default function PriceManagement() {
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [syncingCells, setSyncingCells] = useState<Set<string>>(new Set());
   const [isSavingGlobalConfig, setIsSavingGlobalConfig] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({}); 
+  const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({});
   const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const setStatus = useCallback((key: string, status: 'idle' | 'saving' | 'saved' | 'error', autoClearMs = 2000) => {
@@ -470,14 +470,14 @@ export default function PriceManagement() {
         // Nivel 1: Presencia
         if (a._hasPrices && !b._hasPrices) return -1;
         if (!a._hasPrices && b._hasPrices) return 1;
-        
+
         // Nivel 2: Valor Monetario (Menor a Mayor)
         if (a._hasPrices && b._hasPrices) {
           if (a._maxAmount !== b._maxAmount) {
             return a._maxAmount - b._maxAmount;
           }
         }
-        
+
         // Nivel 3: Vacíos o Empate -> sort_order / índice original
         return vehicles.findIndex(v => v.id === a.id) - vehicles.findIndex(v => v.id === b.id);
       });
@@ -543,82 +543,82 @@ export default function PriceManagement() {
               <ChevronRight className="w-5 h-5" />
             </button>
           )}
-          <div 
+          <div
             ref={scrollContainerRef}
             onScroll={checkScroll}
             className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent"
           >
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50">
-              <tr>
-                <th className="sticky left-0 z-20 px-6 py-4 font-bold tracking-wider min-w-[200px] w-1/3 text-slate-400 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">Concepto</th>
-                {sortedVehicles.map(v => {
-                  const VIcon = VEHICLE_ICONS[v.icon_key as string] || Car;
-                  return (
-                    <th key={v.id} className={cn("px-4 py-3 font-bold text-center text-slate-700 min-w-[120px] transition-all duration-300", !v._hasPrices && "opacity-60 grayscale-[50%]")}>
-                      <div className="flex flex-col items-center gap-1.5 group">
-                        <div className={cn("p-1.5 rounded-md transition-colors group-hover:scale-110 flex items-center justify-center", getColorClasses(v.color_key || 'slate', false))}>
-                          <VIcon size={20} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-[10px] uppercase tracking-wide">{v.name}</span>
-                      </div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {sectionTariffs.map((t) => (
-                <tr key={t.id} className="hover:bg-slate-50/80 transition-colors group">
-                  <td className="sticky left-0 z-10 px-6 py-4 font-bold text-slate-700 flex items-center gap-2 bg-white group-hover:bg-slate-50 transition-colors shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">
-                    {t.name}
-                    {t.is_protected && (
-                      <div className="tooltip" title="Tarifa protegida por sistema">
-                        <Lock className="h-3 w-3 text-amber-400" />
-                      </div>
-                    )}
-                  </td>
-                  {sortedVehicles.map((v) => {
-                    const cellKey = `${t.id}-${v.id}`;
-                    const isSaving = savingCells.has(cellKey);
-                    const isSyncing = syncingCells.has(cellKey);
+                <tr>
+                  <th className="sticky left-0 z-20 px-6 py-4 font-bold tracking-wider min-w-[200px] w-1/3 text-slate-400 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">Concepto</th>
+                  {sortedVehicles.map(v => {
+                    const VIcon = VEHICLE_ICONS[v.icon_key as string] || Car;
                     return (
-                      <td key={v.id} className="px-2 py-2">
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-light text-xs pointer-events-none">$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            defaultValue={getPriceValue(t.id, v.id)}
-                            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                            onBlur={(e) => handlePriceUpsert(t.id, v.id, e.target.value)}
-                            className={cn(
-                              "no-spinner w-full pl-6 pr-3 py-2.5 text-right font-mono font-bold text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                              isSyncing
-                                ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
-                                : isSaving
-                                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
-                                  : "bg-transparent border-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-500 text-slate-700"
-                            )}
-                            placeholder="-"
-                          />
-                          {isSyncing && (
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                              <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
-                            </div>
-                          )}
-                          {isSaving && !isSyncing && (
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                              <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
-                            </div>
-                          )}
+                      <th key={v.id} className={cn("px-4 py-3 font-bold text-center text-slate-700 min-w-[120px] transition-all duration-300", !v._hasPrices && "opacity-60 grayscale-[50%]")}>
+                        <div className="flex flex-col items-center gap-1.5 group">
+                          <div className={cn("p-1.5 rounded-md transition-colors group-hover:scale-110 flex items-center justify-center", getColorClasses(v.color_key || 'slate', false))}>
+                            <VIcon size={20} strokeWidth={2.5} />
+                          </div>
+                          <span className="text-[10px] uppercase tracking-wide">{v.name}</span>
                         </div>
-                      </td>
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
-            </tbody>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sectionTariffs.map((t) => (
+                  <tr key={t.id} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="sticky left-0 z-10 px-6 py-4 font-bold text-slate-700 flex items-center gap-2 bg-white group-hover:bg-slate-50 transition-colors shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">
+                      {t.name}
+                      {t.is_protected && (
+                        <div className="tooltip" title="Tarifa protegida por sistema">
+                          <Lock className="h-3 w-3 text-amber-400" />
+                        </div>
+                      )}
+                    </td>
+                    {sortedVehicles.map((v) => {
+                      const cellKey = `${t.id}-${v.id}`;
+                      const isSaving = savingCells.has(cellKey);
+                      const isSyncing = syncingCells.has(cellKey);
+                      return (
+                        <td key={v.id} className="px-2 py-2">
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-light text-xs pointer-events-none">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              defaultValue={getPriceValue(t.id, v.id)}
+                              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                              onBlur={(e) => handlePriceUpsert(t.id, v.id, e.target.value)}
+                              className={cn(
+                                "no-spinner w-full pl-6 pr-3 py-2.5 text-right font-mono font-bold text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                isSyncing
+                                  ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
+                                  : isSaving
+                                    ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                                    : "bg-transparent border-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-500 text-slate-700"
+                              )}
+                              placeholder="-"
+                            />
+                            {isSyncing && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
+                              </div>
+                            )}
+                            {isSaving && !isSyncing && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </div>
@@ -633,7 +633,7 @@ export default function PriceManagement() {
     if (vehicles.length === 0) return null;
     const selected = vehicles.find(v => v.id === mobileVehicleId);
     const VIcon = selected ? (VEHICLE_ICONS[selected.icon_key as string] || Car) : Car;
-    
+
     return (
       <div className="lg:hidden mb-6 bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-center gap-3">
         <div className={cn("h-10 w-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm", selected ? getColorClasses(selected.color_key || 'slate', true) : 'bg-slate-200')}>
@@ -687,33 +687,33 @@ export default function PriceManagement() {
                   )}
                 </div>
                 <div className="w-[120px] shrink-0 relative">
-                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-light text-sm pointer-events-none">$</span>
-                   <input
-                     type="number"
-                     min="0"
-                     defaultValue={getPriceValue(t.id, selectedVehicle.id)}
-                     onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                     onBlur={(e) => handlePriceUpsert(t.id, selectedVehicle.id, e.target.value)}
-                     className={cn(
-                       "no-spinner w-full pl-6 pr-3 py-2 text-right font-mono font-bold text-base rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                       isSyncing
-                         ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
-                         : isSaving
-                           ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
-                           : "bg-white border-slate-300 focus:border-indigo-500 text-slate-700"
-                     )}
-                     placeholder="-"
-                   />
-                   {isSyncing && (
-                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                       <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
-                     </div>
-                   )}
-                   {isSaving && !isSyncing && (
-                     <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                       <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
-                     </div>
-                   )}
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-light text-sm pointer-events-none">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    defaultValue={getPriceValue(t.id, selectedVehicle.id)}
+                    onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                    onBlur={(e) => handlePriceUpsert(t.id, selectedVehicle.id, e.target.value)}
+                    className={cn(
+                      "no-spinner w-full pl-6 pr-3 py-2 text-right font-mono font-bold text-base rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                      isSyncing
+                        ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
+                        : isSaving
+                          ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                          : "bg-white border-slate-300 focus:border-indigo-500 text-slate-700"
+                    )}
+                    placeholder="-"
+                  />
+                  {isSyncing && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
+                    </div>
+                  )}
+                  {isSaving && !isSyncing && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                      <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -758,8 +758,8 @@ export default function PriceManagement() {
 
     const deleteVehicle = async (id: string) => {
       const hasPrices = prices.some(p => p.vehicle_type_id === id && p.amount > 0);
-      
-      const confirmMsg = hasPrices 
+
+      const confirmMsg = hasPrices
         ? "Este vehículo tiene precios configurados. Si lo eliminas, se borrarán todos sus precios asociados de forma permanente. ¿Continuar?"
         : "¿Eliminar vehículo permanentemente?";
 
@@ -770,7 +770,7 @@ export default function PriceManagement() {
 
           const { error: vehicleError } = await supabase.from('vehicle_types').delete().eq('id', id);
           if (vehicleError) throw vehicleError;
-          
+
           if (garageId) fetchAllData(garageId);
         } catch (err: any) {
           console.error('Error deleting vehicle:', err);
@@ -1329,7 +1329,7 @@ export default function PriceManagement() {
 
         {/* List */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {([{ type: 'hora', title: 'Por Hora', Icon: Clock }, { type: 'turno', title: 'Estadías/Turnos', Icon: CalendarDays }, { type: 'abono', title: 'Abonos Mensuales', Icon: Zap }] as const).map(({ type, title, Icon }) => {
+          {([{ type: 'hora', title: 'Por Hora', Icon: Clock }, { type: 'turno', title: 'Anticipados', Icon: CalendarDays }, { type: 'abono', title: 'Abonos Mensuales', Icon: Zap }] as const).map(({ type, title, Icon }) => {
             const typeTariffs = tariffs.filter(t => t.type === type);
             return (
               <div key={type} className="flex flex-col gap-3">
@@ -1717,11 +1717,11 @@ export default function PriceManagement() {
               {/* Note: We map DB type back to UI Logic for the sections */}
               <MobileVehicleSelector />
               <DesktopMatrixSection title="Valores por Hora y Fracción" type="hora" icon={Clock} colorClass="bg-blue-100 text-blue-600" />
-              <DesktopMatrixSection title="Estadías y Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
+              <DesktopMatrixSection title="Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
               <DesktopMatrixSection title="Abonos Mensuales" type="abono" icon={Zap} colorClass="bg-emerald-100 text-emerald-600" />
-              
+
               <MobileMatrixSection title="Valores por Hora y Fracción" type="hora" icon={Clock} colorClass="bg-blue-100 text-blue-600" />
-              <MobileMatrixSection title="Estadías y Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
+              <MobileMatrixSection title="Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
               <MobileMatrixSection title="Abonos Mensuales" type="abono" icon={Zap} colorClass="bg-emerald-100 text-emerald-600" />
             </>
           )

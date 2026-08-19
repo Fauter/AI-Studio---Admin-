@@ -15,6 +15,93 @@ const PEAK_PERIOD_DAYS: Record<string, number> = {
     '90_days': 90,
 };
 
+interface CacheEntry {
+    stays: Stay[];
+    startDate: Date;
+    promise?: Promise<Stay[]>;
+}
+
+const staysCache = new Map<string, CacheEntry>();
+const prefetchAbortControllers = new Map<string, AbortController>();
+
+function get90DaysStartDate(inicioHoy: Date) {
+    return new Date(inicioHoy.getFullYear(), inicioHoy.getMonth(), inicioHoy.getDate() - 90 + 1, 0, 0, 0, 0);
+}
+
+async function fetchStaysFromSupabase(garageIds: string[], startDate: Date, signal?: AbortSignal): Promise<Stay[]> {
+    const isoStart = startDate.toISOString();
+    let allStays: Stay[] = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    
+    while (true) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        
+        let query = supabase
+            .from('stays')
+            .select('id,garage_id,plate,entry_time,exit_time,active')
+            .in('garage_id', garageIds)
+            .or(`entry_time.gte.${isoStart},active.eq.true,exit_time.gte.${isoStart}`)
+            .order('entry_time', { ascending: false })
+            .range(from, from + PAGE_SIZE - 1);
+            
+        if (signal) {
+            query = query.abortSignal(signal);
+        }
+
+        const { data, error } = await query;
+            
+        if (error) throw error;
+        
+        if (data) allStays = allStays.concat(data as Stay[]);
+        if (!data || data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+    }
+    return allStays;
+}
+
+async function prefetch90Days(garageIds: string[], inicioHoy: Date) {
+    const cacheKey = [...garageIds].sort().join(',');
+    const startDate = get90DaysStartDate(inicioHoy);
+    
+    const cached = staysCache.get(cacheKey);
+    if (cached && cached.startDate.getTime() <= startDate.getTime()) {
+        return;
+    }
+
+    if (prefetchAbortControllers.has(cacheKey)) {
+        prefetchAbortControllers.get(cacheKey)?.abort();
+    }
+    
+    const abortController = new AbortController();
+    prefetchAbortControllers.set(cacheKey, abortController);
+    
+    const promise = fetchStaysFromSupabase(garageIds, startDate, abortController.signal);
+    
+    staysCache.set(cacheKey, {
+        stays: [],
+        startDate: startDate,
+        promise: promise
+    });
+
+    try {
+        const stays = await promise;
+        if (!abortController.signal.aborted) {
+            staysCache.set(cacheKey, { stays, startDate, promise: undefined });
+        }
+    } catch (err: any) {
+        if (err.name !== 'AbortError') {
+            console.error("Error prefetching 90 days peak stays:", err);
+            const currentCache = staysCache.get(cacheKey);
+            if (currentCache?.promise === promise) {
+                staysCache.delete(cacheKey);
+            }
+        }
+    } finally {
+        prefetchAbortControllers.delete(cacheKey);
+    }
+}
+
 export function usePeakStays(
     garageIds: string[],
     peakPeriod: PeakPeriod,
@@ -25,7 +112,7 @@ export function usePeakStays(
     const [loading, setLoading] = useState(false);
     
     const fetchIdRef = useRef(0);
-    const cacheRef = useRef<Record<string, Stay[]>>({});
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         if (garageIds.length === 0) {
@@ -46,7 +133,7 @@ export function usePeakStays(
             startDate = new Date(inicioHoy.getFullYear(), inicioHoy.getMonth(), inicioHoy.getDate() - days + 1, 0, 0, 0, 0);
         }
 
-        const cacheKey = `${garageIds.sort().join(',')}_${peakPeriod}`;
+        const cacheKey = [...garageIds].sort().join(',');
 
         const processStays = (stays: Stay[]) => {
             if (fetchId !== fetchIdRef.current) return;
@@ -55,49 +142,65 @@ export function usePeakStays(
             setLoading(false);
         };
 
-        if (peakPeriod !== 'today' && cacheRef.current[cacheKey]) {
-            processStays(cacheRef.current[cacheKey]);
-            return;
-        }
+        const getStaysForPeriod = async () => {
+            const cached = staysCache.get(cacheKey);
 
-        const fetchStays = async () => {
-            setLoading(true);
-            try {
-                const isoStart = startDate.toISOString();
-                let allStays: Stay[] = [];
-                let from = 0;
-                const PAGE_SIZE = 1000;
-                
-                while (true) {
-                    const { data, error } = await supabase
-                        .from('stays')
-                        .select('id,garage_id,plate,entry_time,exit_time,active')
-                        .in('garage_id', garageIds)
-                        .or(`entry_time.gte.${isoStart},active.eq.true,exit_time.gte.${isoStart}`)
-                        .range(from, from + PAGE_SIZE - 1);
-                        
-                    if (error) throw error;
-                    
-                    if (data) allStays = allStays.concat(data as Stay[]);
-                    if (!data || data.length < PAGE_SIZE) break;
-                    from += PAGE_SIZE;
-                }
-                
-                if (fetchId === fetchIdRef.current) {
-                    if (peakPeriod !== 'today') {
-                        cacheRef.current[cacheKey] = allStays;
+            if (cached) {
+                if (cached.stays.length > 0 && cached.startDate.getTime() <= startDate.getTime()) {
+                    processStays(cached.stays);
+                    if (cached.startDate.getTime() > get90DaysStartDate(inicioHoy).getTime()) {
+                        prefetch90Days(garageIds, inicioHoy);
                     }
-                    processStays(allStays);
+                    return;
                 }
-            } catch (err) {
-                console.error("Error fetching peak stays:", err);
-                if (fetchId === fetchIdRef.current) {
-                    setLoading(false);
+                
+                if (cached.promise && cached.startDate.getTime() <= startDate.getTime()) {
+                    setLoading(true);
+                    try {
+                        const stays = await cached.promise;
+                        processStays(stays);
+                    } catch (err) {
+                        // handled by the promise creator
+                    }
+                    return;
+                }
+            }
+
+            setLoading(true);
+            
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+            const abortController = new AbortController();
+            abortControllerRef.current = abortController;
+
+            const promise = fetchStaysFromSupabase(garageIds, startDate, abortController.signal);
+            
+            staysCache.set(cacheKey, {
+                stays: [],
+                startDate: startDate,
+                promise: promise
+            });
+
+            try {
+                const stays = await promise;
+                if (!abortController.signal.aborted) {
+                    staysCache.set(cacheKey, { stays, startDate, promise: undefined });
+                    processStays(stays);
+                    
+                    if (startDate.getTime() > get90DaysStartDate(inicioHoy).getTime()) {
+                         prefetch90Days(garageIds, inicioHoy);
+                    }
+                }
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error("Error fetching peak stays:", err);
+                    if (fetchId === fetchIdRef.current) setLoading(false);
                 }
             }
         };
 
-        fetchStays();
+        getStaysForPeriod();
 
     }, [garageIds, peakPeriod, historicalChartView, peakMode]);
 

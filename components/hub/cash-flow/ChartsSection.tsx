@@ -182,7 +182,8 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
         return <div ref={ref} className="w-full h-full relative" />;
     }
 
-    const dataMax = Math.max(...data, 1);
+    const actualDataMax = Math.max(...data);
+    const dataMax = Math.max(actualDataMax, 1);
     const currentHour = new Date().getHours();
     
     const pad = { top: 24, right: 16, bottom: 30, left: 24 };
@@ -214,7 +215,7 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
     
     const plotMax = Math.max(dataMax, yTicks.length > 0 ? yTicks[yTicks.length - 1] : dataMax);
     
-    const peakIndex = data.indexOf(Math.max(...data));
+    const peakIndex = data.indexOf(actualDataMax);
     const minLabelSpace = 20;
     const labelStep = Math.max(1, Math.ceil(minLabelSpace / barW));
 
@@ -223,7 +224,7 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
 
     if (activeIndex !== null && data[activeIndex] !== undefined) {
         const val = data[activeIndex];
-        const isPeak = val === Math.max(...data) && val > 0;
+        const isPeak = val === actualDataMax && val > 0;
         const activeX = pad.left + activeIndex * barW + barW / 2;
         const activeBarH = (val / plotMax) * chartH;
         const activeY = pad.top + chartH - activeBarH;
@@ -314,7 +315,7 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
                     const y = pad.top + chartH - barH;
                     const w = barW - gap * 2;
                     const isCurrentHour = (peakPeriod === "today" || historicalChartView === "hourly-profile") && hour === currentHour;
-                    const isPeakHour = val === Math.max(...data, 1) && val > 0;
+                    const isPeakHour = val === actualDataMax && val > 0;
                     const isVisibleLabel = visibleXIndices.has(hour);
                     const isHovered = activeIndex === hour;
                     

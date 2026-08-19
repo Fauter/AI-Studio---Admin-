@@ -19,8 +19,11 @@ import {
     Subscription,
     Debt,
     Cochera,
-    UnifiedTransaction
-, getExpenseDisplayText} from './cash-flow/CashFlowShared';
+    UnifiedTransaction,
+    getExpenseDisplayText,
+    PeakPeriod,
+    ChartView
+} from './cash-flow/CashFlowShared';
 import { usePeakStays } from './cash-flow/usePeakStays';
 import KpiGrid from './cash-flow/KpiGrid';
 import ChartsSection from './cash-flow/ChartsSection';
@@ -48,8 +51,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const { profile } = useAuth();
     const [activeSection, setActiveSection] = useState<ActiveSection>('resumen');
     const [peakMode, setPeakMode] = useState<PeakMode>('occupancy');
-    const [peakPeriod, setPeakPeriod] = useState<any>('30_days');
-    const [historicalChartView, setHistoricalChartView] = useState<any>('historical');
+    const [peakPeriod, setPeakPeriod] = useState<PeakPeriod>('today');
+    const [historicalChartView, setHistoricalChartView] = useState<ChartView>('historical');
     const [selectedGarageId, setSelectedGarageId] = useState<string>('all');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState({
@@ -646,6 +649,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 if (e.garage_id !== g.id) return false;
                 const ts = new Date(e.timestamp).getTime();
                 return ts >= inicioMes && ts < mananaMs;
+            }).sort((a, b) => {
+                const timeA = new Date(a.created_at || a.timestamp).getTime();
+                const timeB = new Date(b.created_at || b.timestamp).getTime();
+                return timeB - timeA;
             });
             const monthlyExpenses = garageExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);
             const monthlyRevenue = gMoves

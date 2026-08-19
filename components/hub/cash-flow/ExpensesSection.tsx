@@ -10,16 +10,6 @@ import { formatDateTime24h } from '../../../lib/dateFormatters';
 // Helpers
 // ─────────────────────────────────────────────────────────────
 
-function buildExpenseDetail(imputation: string | null | undefined, observations: string | null | undefined): string {
-    const i = imputation?.trim();
-    const o = observations?.trim();
-
-    if (i && o) return `${i} - ${o}`;
-    if (i) return i;
-    if (o) return o;
-
-    return '—';
-}
 
 // ─────────────────────────────────────────────────────────────
 // Props Interface
@@ -374,7 +364,7 @@ export default function ExpensesSection({
                                                         </span>
                                                         <span className="text-slate-300 font-light">|</span>
                                                         <span className="font-bold text-slate-800 text-sm truncate">
-                                                            {buildExpenseDetail(expense.recipient_name, expense.notes)}
+                                                            {getExpenseDisplayText(expense.recipient_name, expense.notes)}
                                                         </span>
                                                     </div>
                                                     {/* Renglón 2 */}
@@ -403,7 +393,7 @@ export default function ExpensesSection({
                                                     <span className="inline-flex items-center gap-1.5 text-sm text-slate-700">
                                                         <ClipboardList className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                                         <span className="truncate max-w-[350px]">
-                                                            {buildExpenseDetail(expense.recipient_name, expense.notes)}
+                                                            {getExpenseDisplayText(expense.recipient_name, expense.notes)}
                                                         </span>
                                                     </span>
                                                 </td>
