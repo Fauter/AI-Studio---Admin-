@@ -146,7 +146,7 @@ export function usePeakStays(
             const cached = staysCache.get(cacheKey);
 
             if (cached) {
-                if (cached.stays.length > 0 && cached.startDate.getTime() <= startDate.getTime()) {
+                if (!cached.promise && cached.startDate.getTime() <= startDate.getTime()) {
                     processStays(cached.stays);
                     if (cached.startDate.getTime() > get90DaysStartDate(inicioHoy).getTime()) {
                         prefetch90Days(garageIds, inicioHoy);
@@ -160,7 +160,7 @@ export function usePeakStays(
                         const stays = await cached.promise;
                         processStays(stays);
                     } catch (err) {
-                        // handled by the promise creator
+                        if (fetchId === fetchIdRef.current) setLoading(false);
                     }
                     return;
                 }

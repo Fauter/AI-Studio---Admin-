@@ -67,7 +67,13 @@ function RevenueAreaChart({ data, maxVal }: { data: { day: number; current: numb
     const { ref, dimensions } = useContainerDimensions();
     const { width: W, height: H } = dimensions;
 
-    if (data.length === 0) return <EmptyChartPlaceholder label="Sin datos de facturación" />;
+    if (data.length === 0) {
+        return (
+            <div ref={ref} className="w-full h-full relative">
+                <EmptyChartPlaceholder label="Sin datos de facturación" />
+            </div>
+        );
+    }
     
     if (W === 0 || H === 0) {
         return <div ref={ref} className="w-full h-full relative" />;
@@ -176,7 +182,13 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
     
-    if (loading || data.every(v => v === 0)) return <EmptyChartPlaceholder peakMode={peakMode} loading={loading} />;
+    if (loading || data.every(v => v === 0)) {
+        return (
+            <div ref={ref} className="w-full h-full relative">
+                <EmptyChartPlaceholder peakMode={peakMode} loading={loading} />
+            </div>
+        );
+    }
     
     if (W === 0 || H === 0) {
         return <div ref={ref} className="w-full h-full relative" />;
