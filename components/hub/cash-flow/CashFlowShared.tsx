@@ -37,10 +37,22 @@ export interface Stay {
     active: boolean;
 }
 
+export interface Customer {
+    id: string;
+    garage_id: string;
+    name: string;
+    dni?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    localidad?: string;
+}
+
 export interface Subscription {
     id: string;
     garage_id: string;
     customer_id?: string;
+    vehicle_id?: string;
     start_date?: string;
     end_date?: string;
     active?: boolean;

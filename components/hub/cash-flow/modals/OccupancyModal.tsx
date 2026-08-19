@@ -13,7 +13,7 @@ export default function OccupancyModal({ isOpen, onClose, cocheras, activeStays 
     if (!isOpen) return null;
 
     // Cocheras that are available
-    const libres = useMemo(() => cocheras.filter(c => c.status === 'Disponible' || c.status === 'Libre'), [cocheras]);
+    const libres = useMemo(() => cocheras.filter(c => c.status === 'Libre'), [cocheras]);
     
     // Cocheras that are occupied (Fijas/Abonados)
     const ocupadas = useMemo(() => cocheras.filter(c => c.status === 'Ocupada'), [cocheras]);

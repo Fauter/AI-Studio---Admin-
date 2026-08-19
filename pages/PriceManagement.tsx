@@ -208,7 +208,7 @@ export default function PriceManagement() {
     if (resVehicles.error) throw resVehicles.error;
     if (resTariffs.error) throw resTariffs.error;
     if (resPrices.error) throw resPrices.error;
-    if (resFinancial.error && resFinancial.code !== 'PGRST116') throw resFinancial.error;
+    if (resFinancial.error && ((resFinancial.error as any)?.code !== 'PGRST116')) throw resFinancial.error;
 
     setVehicles(resVehicles.data || []);
     setTariffs(resTariffs.data || []);
