@@ -9,7 +9,7 @@ interface CashFlowState {
     movements: Movement[];
     stays: Stay[];
     allStays: Stay[];
-    vehicles: { plate: string; type: string; is_subscriber?: boolean; garage_id?: string; customer_id?: string }[];
+    vehicles: { id?: string; plate: string; type: string; is_subscriber?: boolean; garage_id?: string; customer_id?: string }[];
     employees: { id: string; full_name: string }[];
     subscriptions: Subscription[];
     debts: Debt[];
@@ -19,6 +19,7 @@ interface CashFlowState {
     tariffs: any[];
     vehicleTypes: any[];
     prices: any[];
+    customers: any[];
 
     loadingTier1: boolean;
     loadingTier2: boolean;
@@ -49,6 +50,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
     tariffs: [],
     vehicleTypes: [],
     prices: [],
+    customers: [],
 
     loadingTier1: true,
     loadingTier2: false,
@@ -150,25 +152,66 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
                 }
             };
 
+            const fetchCustomers = async () => {
+                const PAGE_SIZE = 1000;
+                let allCustomers: any[] = [];
+                let from = 0;
+                let keepFetching = true;
+                while (keepFetching) {
+                    const batch = await retry(() => supabase
+                        .from('customers')
+                        .select('id, garage_id, name, dni, email, phone')
+                        .in('garage_id', garageIds)
+                        .range(from, from + PAGE_SIZE - 1)
+                    );
+                    const rows = (batch || []) as any[];
+                    allCustomers = allCustomers.concat(rows);
+                    if (rows.length < PAGE_SIZE) keepFetching = false;
+                    else from += PAGE_SIZE;
+                }
+                return allCustomers;
+            };
+
+            const fetchVehicles = async () => {
+                const PAGE_SIZE = 1000;
+                let allVehicles: any[] = [];
+                let from = 0;
+                let keepFetching = true;
+                while (keepFetching) {
+                    const batch = await retry(() => supabase
+                        .from('vehicles')
+                        .select('id, plate, type, is_subscriber, garage_id, customer_id')
+                        .in('garage_id', garageIds)
+                        .range(from, from + PAGE_SIZE - 1)
+                    );
+                    const rows = (batch || []) as any[];
+                    allVehicles = allVehicles.concat(rows);
+                    if (rows.length < PAGE_SIZE) keepFetching = false;
+                    else from += PAGE_SIZE;
+                }
+                return allVehicles;
+            };
+
             // Ejecución 100% concurrente
             const [
                 tariffsData, vehicleTypesData, cocherasData, levelsData, pricesData,
                 subsData, debtsData, vehiclesData, activeStaysData, allStaysData,
-                expensesData, movementsData, employeesData
+                expensesData, movementsData, employeesData, customersData
             ] = await Promise.all([
                 trackProgress(retry(() => supabase.from('tariffs').select('id, name, type, garage_id').in('garage_id', garageIds)), 'Tarifas'),
                 trackProgress(retry(() => supabase.from('vehicle_types').select('id, name, garage_id').in('garage_id', garageIds)), 'Tipos de Vehículo'),
                 trackProgress(retry(() => supabase.from('cocheras').select('id, garage_id, tipo, status, numero, cliente_id, vehiculos, precio_base').in('garage_id', garageIds)), 'Cocheras'),
                 trackProgress(retry(() => supabase.from('building_levels').select('id, garage_id, display_name, total_spots').in('garage_id', garageIds)), 'Niveles'),
                 trackProgress(retry(() => supabase.from('prices').select('amount, tariff_id, vehicle_type_id')), 'Precios'),
-                trackProgress(retry(() => supabase.from('subscriptions').select('id, garage_id, customer_id, start_date, end_date, active, price, type').in('garage_id', garageIds)), 'Abonos'),
+                trackProgress(retry(() => supabase.from('subscriptions').select('id, garage_id, customer_id, start_date, end_date, active, price, type, vehicle_id').in('garage_id', garageIds)), 'Abonos'),
                 trackProgress(retry(() => supabase.from('debts').select('id, remaining_amount, status, due_date, customer_id, garage_id, created_at, amount, subscription_id, customers:customer_id(name), subscriptions:subscription_id(type)').in('garage_id', garageIds).eq('status', 'PENDING')), 'Deudas'),
-                trackProgress(retry(() => supabase.from('vehicles').select('plate, type, is_subscriber, garage_id, customer_id').in('garage_id', garageIds)), 'Vehículos'),
+                trackProgress(fetchVehicles(), 'Vehículos'),
                 trackProgress(retry(() => supabase.from('stays').select('*').in('garage_id', garageIds).eq('active', true).order('entry_time', { ascending: false })), 'Estadías Activas'),
                 trackProgress(retry(() => supabase.from('stays').select('id,garage_id,plate,entry_time,exit_time,vehicle_type,active').in('garage_id', garageIds).gte('entry_time', movementsSince).order('entry_time', { ascending: false }).limit(3000)), 'Histórico de Estadías'),
                 trackProgress(retry(() => supabase.from('expenses').select('id, garage_id, owner_id, template_id, description, imputation, custom_garage_name, amount, expense_type, expense_date, created_at, created_by').in('garage_id', garageIds).gte('expense_date', movementsSince).order('expense_date', { ascending: false })), 'Egresos'),
                 trackProgress(fetchMovements(), 'Movimientos'),
-                trackProgress(fetchEmployees(), 'Operadores')
+                trackProgress(fetchEmployees(), 'Operadores'),
+                trackProgress(fetchCustomers(), 'Clientes')
             ]);
 
             set({
@@ -185,6 +228,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
                 expenses: (expensesData || []) as Expense[],
                 movements: movementsData || [],
                 employees: employeesData || [],
+                customers: customersData || [],
                 loadingTier1: false,
                 isInitialized: true,
                 loadingStep: 'Carga completa'
@@ -283,3 +327,8 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
         }
     }
 }));
+
+
+
+
+

@@ -1,0 +1,808 @@
+Created At: 2026-08-18T21:13:06-03:00
+Completed At: 2026-08-18T21:13:06-03:00
+File Path: `file:///c:/Users/lmfau/OneDrive/Escritorio/Code/ZZZ/AI%20Studio%20Admin/pages/CashClosuresPage.tsx`
+Total Lines: 1272
+Total Bytes: 82371
+Showing lines 1 to 800
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useMemo } from 'react';
+2: import { createPortal } from 'react-dom';
+3: import { useParams } from 'react-router-dom';
+4: import { supabase } from '../lib/supabase';
+5: import { formatDateTime24h, formatDateOnly, formatTime24h } from '../lib/dateFormatters';
+6: import {
+7:     Banknote, Search, Loader2, AlertCircle,
+8:     CheckCircle2, Clock, History, ArrowDownCircle, ChevronRight, Calculator, ReceiptText, Plus, X
+9: } from 'lucide-react';
+10: import SectionHeader from '../components/hub/SectionHeader';
+11: import { useAuth } from '../hooks/useAuth';
+12: 
+13: // --- Interfaces ---
+14: interface ShiftClose {
+15:     id: string;
+16:     garage_id: string;
+17:     created_at: string;
+18:     operator: string | null;
+19:     total_in_cash: number;
+20:     staying_in_cash: number;
+21:     is_withdrawn: boolean;
+22:     withdrawn_by_name: string | null;
+23: }
+24: 
+25: type PartialMovementType = 'withdrawal' | 'expense';
+26: 
+27: interface PartialClose {
+28:     id: string;
+29:     garage_id: string;
+30:     created_at: string;
+31:     operator: string | null;
+32:     amount: number;
+33:     recipient_name: string | null;
+34:     notes: string | null;
+35:     movement_type: PartialMovementType | null;
+36:     is_withdrawn: boolean;
+37:     withdrawn_by_name: string | null;
+38: }
+39: 
+40: interface Movement {
+41:     id: string;
+42:     garage_id: string;
+43:     amount: number;
+44:     payment_method?: string;
+45:     timestamp: string;
+46: }
+47: 
+48: type UnifiedWithdrawn = {
+49:     id: string;
+50:     created_at: string;
+51:     operator: string | null;
+52:     withdrawn_by_name: string | null;
+53:     type: 'Cierre de Turno' | 'Retiro Parcial';
+54:     amount: number;
+55:     detail: string;
+56:     total_in_cash?: number;
+57:     staying_in_cash?: number;
+58:     rendered_amount?: number;
+59: };
+60: 
+61: type TabKey = 'computo' | 'shifts' | 'partials' | 'expenses' | 'history';
+62: 
+63: // ---- Helper ----
+64: function normalizeMovementType(value: string | null | undefined): PartialMovementType {
+65:     if (value === 'expense') return 'expense';
+66:     return 'withdrawal';
+67: }
+68: 
+69: function sanitizeOptionalText(value: string | null | undefined): string | null {
+70:     if (!value) return null;
+71:     const trimmed = value.trim();
+72:     if (trimmed === '' || trimmed.toLowerCase() === 'desconocido') return null;
+73:     return trimmed;
+74: }
+75: 
+76: function buildPartialCloseDetail(recipient: string | null | undefined, notes: string | null | undefined): string {
+77:     const r = sanitizeOptionalText(recipient);
+78:     const n = sanitizeOptionalText(notes);
+79:     if (r && n) return `${r} - ${n}`;
+80:     if (r) return r;
+81:     if (n) return n;
+82:     return '—';
+83: }
+84: 
+85: // ---- Formatting ----
+86: const formatDate = formatDateTime24h;
+87: 
+88: function formatCurrency(amount: number) {
+89:     return `$${Number(amount || 0).toLocaleString('es-AR')}`;
+90: }
+91: 
+92: // ---- Internal grouped-cell component ----
+93: interface MetricLineProps {
+94:     label: string;
+95:     value: string;
+96:     bold?: boolean;
+97:     colorClass?: string;
+98:     separator?: boolean;
+99: }
+100: 
+101: function MetricLine({ label, value, bold, colorClass, separator }: MetricLineProps) {
+102:     return (
+103:         <div
+104:             className={`grid grid-cols-[1fr_auto] gap-x-3 items-baseline py-0.5 ${
+105:                 separator ? 'border-t border-slate-200 pt-1 mt-0.5' : ''
+106:             }`}
+107:         >
+108:             <span className={`text-xs whitespace-nowrap ${bold ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>
+109:                 {label}
+110:             </span>
+111:             <span
+112:                 className={`text-xs tabular-nums whitespace-nowrap text-right ${
+113:                     bold
+114:                         ? `font-bold ${colorClass || 'text-slate-800'}`
+115:                         : `${colorClass || 'text-slate-600'}`
+116:                 }`}
+117:             >
+118:                 {value}
+119:             </span>
+120:         </div>
+121:     );
+122: }
+123: 
+124: export default function CashClosuresPage() {
+125:     const { garageId } = useParams<{ garageId: string }>();
+126: 
+127:     const [loading, setLoading] = useState(true);
+128:     const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+129:     const [error, setError] = useState<string | null>(null);
+130: 
+131:     const [shiftCloses, setShiftCloses] = useState<ShiftClose[]>([]);
+132:     const [partialCloses, setPartialCloses] = useState<PartialClose[]>([]);
+133:     const [movements, setMovements] = useState<Movement[]>([]);
+134: 
+135:     const [activeTab, setActiveTab] = useState<TabKey>('computo');
+136:     const [searchTerm, setSearchTerm] = useState('');
+137:     const [dateFrom, setDateFrom] = useState('');
+138:     const [dateTo, setDateTo] = useState('');
+139:     const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<string>>(new Set());
+140: 
+141:     const { profile } = useAuth();
+142:     
+143:     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+144:     const [expenseAmount, setExpenseAmount] = useState('');
+145:     const [expenseRecipient, setExpenseRecipient] = useState('');
+146:     const [expenseNotes, setExpenseNotes] = useState('');
+147:     const [isCreatingExpense, setIsCreatingExpense] = useState(false);
+148:     const [expenseFormError, setExpenseFormError] = useState<string | null>(null);
+149: 
+150:     // Block body scroll when modal is open
+151:     useEffect(() => {
+152:         if (isExpenseModalOpen) {
+153:             document.body.style.overflow = 'hidden';
+154:         } else {
+155:             document.body.style.overflow = '';
+156:         }
+157:         return () => {
+158:             document.body.style.overflow = '';
+159:         };
+160:     }, [isExpenseModalOpen]);
+161: 
+162:     const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+163:         const val = e.target.value;
+164:         const clean = val.replace(/[^0-9,]/g, '');
+165:         if (!clean) {
+166:             setExpenseAmount('');
+167:             return;
+168:         }
+169:         const parts = clean.split(',');
+170:         let integerStr = parts[0];
+171:         let decimalStr = parts.length > 1 ? parts[1] : undefined;
+172: 
+173:         const parsedInt = parseInt(integerStr, 10);
+174:         if (!isNaN(parsedInt)) {
+175:             integerStr = parsedInt.toLocaleString('es-AR');
+176:         } else {
+177:             integerStr = '';
+178:         }
+179: 
+180:         if (decimalStr !== undefined) {
+181:             setExpenseAmount(`${integerStr},${decimalStr}`);
+182:         } else {
+183:             setExpenseAmount(integerStr);
+184:         }
+185:     };
+186: 
+187:     const toggleExpandHistory = (id: string) => {
+188:         setExpandedHistoryIds(prev => {
+189:             const next = new Set(prev);
+190:             if (next.has(id)) next.delete(id);
+191:             else next.add(id);
+192:             return next;
+193:         });
+194:     };
+195: 
+196:     // --- Data Fetching ---
+197:     const fetchData = async () => {
+198:         if (!garageId) return;
+199:         setLoading(true);
+200:         setError(null);
+201:         try {
+202:             const [shiftsRes, partialsRes, movementsRes] = await Promise.all([
+203:                 supabase.from('shift_closes').select('*').eq('garage_id', garageId).order('created_at', { ascending: false }),
+204:                 supabase.from('partial_closes').select('*').eq('garage_id', garageId).order('created_at', { ascending: false }),
+205:                 supabase.from('movements').select('id, garage_id, amount, payment_method, timestamp').eq('garage_id', garageId).order('timestamp', { ascending: false }),
+206:             ]);
+207:             if (shiftsRes.error) throw shiftsRes.error;
+208:             if (partialsRes.error) throw partialsRes.error;
+209:             if (movementsRes.error) throw movementsRes.error;
+210:             setShiftCloses(shiftsRes.data as ShiftClose[] || []);
+211:             setPartialCloses(partialsRes.data as PartialClose[] || []);
+212:             setMovements(movementsRes.data as Movement[] || []);
+213:         } catch (err: any) {
+214:             setError('Error al cargar los datos: ' + err.message);
+215:         } finally {
+216:             setLoading(false);
+217:         }
+218:     };
+219: 
+220:     useEffect(() => { fetchData(); }, [garageId]);
+221: 
+222:     // --- Withdraw Actions ---
+223:     const handleWithdrawShift = async (id: string) => {
+224:         setWithdrawingId(id);
+225:         try {
+226:             const { data: { user } } = await supabase.auth.getUser();
+227:             const withdrawnByName = user?.user_metadata?.full_name || user?.email || 'Administrador';
+228: 
+229:             const { error } = await supabase
+230:                 .from('shift_closes')
+231:                 .update({ is_withdrawn: true, withdrawn_by_name: withdrawnByName })
+232:                 .eq('id', id)
+233:                 .eq('garage_id', garageId);
+234:             if (error) throw error;
+235:             setShiftCloses(prev => prev.map(s => s.id === id ? { ...s, is_withdrawn: true, withdrawn_by_name: withdrawnByName } : s));
+236:         } catch (err: any) {
+237:             setError('Error al retirar: ' + err.message);
+238:         } finally {
+239:             setWithdrawingId(null);
+240:         }
+241:     };
+242: 
+243:     const handleWithdrawPartial = async (id: string) => {
+244:         setWithdrawingId(id);
+245:         try {
+246:             const { data: { user } } = await supabase.auth.getUser();
+247:             const withdrawnByName = user?.user_metadata?.full_name || user?.email || 'Administrador';
+248: 
+249:             const { error } = await supabase
+250:                 .from('partial_closes')
+251:                 .update({ is_withdrawn: true, withdrawn_by_name: withdrawnByName })
+252:                 .eq('id', id)
+253:                 .eq('garage_id', garageId);
+254:             if (error) throw error;
+255:             setPartialCloses(prev => prev.map(p => p.id === id ? { ...p, is_withdrawn: true, withdrawn_by_name: withdrawnByName } : p));
+256:         } catch (err: any) {
+257:             setError('Error al procesar: ' + err.message);
+258:         } finally {
+259:             setWithdrawingId(null);
+260:         }
+261:     };
+262: 
+263:     const resetExpenseForm = () => {
+264:         setExpenseAmount('');
+265:         setExpenseRecipient('');
+266:         setExpenseNotes('');
+267:         setExpenseFormError(null);
+268:     };
+269: 
+270:     const handleCreateExpense = async (e: React.FormEvent) => {
+271:         e.preventDefault();
+272:         if (isCreatingExpense) return;
+273: 
+274:         setExpenseFormError(null);
+275: 
+276:         if (!garageId) {
+277:             setExpenseFormError('No se pudo determinar el garage actual.');
+278:             return;
+279:         }
+280: 
+281:         const operatorName = profile?.full_name?.trim();
+282:         if (!operatorName) {
+283:             setExpenseFormError('No fue posible identificar al operador actual. Vuelva a iniciar sesión.');
+284:             return;
+285:         }
+286: 
+287:         // Amount parsing (handles commas and dots, ensuring format is valid)
+288:         const normalizedAmountString = expenseAmount.replace(/\./g, '').replace(',', '.');
+289:         const parsedAmount = parseFloat(normalizedAmountString);
+290: 
+291:         if (isNaN(parsedAmount) || parsedAmount <= 0) {
+292:             setExpenseFormError('El monto ingresado es inválido o debe ser mayor a cero.');
+293:             return;
+294:         }
+295: 
+296:         const recipient = expenseRecipient.trim() || null;
+297:         const notes = expenseNotes.trim() || null;
+298: 
+299:         if (!recipient && !notes) {
+300:             setExpenseFormError('Ingresá al menos un beneficiario o un concepto para el egreso.');
+301:             return;
+302:         }
+303: 
+304:         setIsCreatingExpense(true);
+305: 
+306:         try {
+307:             const { data, error: insertError } = await supabase
+308:                 .from('partial_closes')
+309:                 .insert({
+310:                     garage_id: garageId,
+311:                     operator: operatorName,
+312:                     amount: parsedAmount,
+313:                     recipient_name: recipient,
+314:                     notes: notes,
+315:                     movement_type: 'expense'
+316:                 })
+317:                 .select('*')
+318:                 .single();
+319: 
+320:             if (insertError) throw insertError;
+321: 
+322:             setPartialCloses(prev => [data as PartialClose, ...prev]);
+323:             
+324:             resetExpenseForm();
+325:             setIsExpenseModalOpen(false);
+326:         } catch (err: any) {
+327:             console.error('Error creando egreso:', err);
+328:             setExpenseFormError('No se pudo guardar el egreso. Intentá nuevamente.');
+329:         } finally {
+330:             setIsCreatingExpense(false);
+331:         }
+332:     };
+333: 
+334:     // --- Filtering helpers ---
+335:     const applyFilters = <T extends { operator: string | null; created_at: string }>(items: T[]) => {
+336:         return items.filter(item => {
+337:             const matchesSearch = !searchTerm ||
+338:                 (item.operator || '').toLowerCase().includes(searchTerm.toLowerCase());
+339:             const itemDate = new Date(item.created_at);
+340:             const matchesFrom = !dateFrom || itemDate >= new Date(dateFrom);
+341:             const matchesTo = !dateTo || itemDate <= new Date(dateTo + 'T23:59:59');
+342:             return matchesSearch && matchesFrom && matchesTo;
+343:         });
+344:     };
+345: 
+346:     const pendingShifts = useMemo(() =>
+347:         applyFilters(shiftCloses.filter(s => !s.is_withdrawn)),
+348:         [shiftCloses, searchTerm, dateFrom, dateTo]
+349:     );
+350: 
+351:     const pendingWithdrawals = useMemo(() =>
+352:         applyFilters(partialCloses.filter(p => !p.is_withdrawn && normalizeMovementType(p.movement_type) === 'withdrawal')),
+353:         [partialCloses, searchTerm, dateFrom, dateTo]
+354:     );
+355: 
+356:         const expenseRows = useMemo(() =>
+357:         applyFilters(partialCloses.filter(p => normalizeMovementType(p.movement_type) === 'expense')),
+358:         [partialCloses, searchTerm, dateFrom, dateTo]
+359:     );
+360: 
+361:     const withdrawnHistory = useMemo((): UnifiedWithdrawn[] => {
+362:         const shifts: UnifiedWithdrawn[] = shiftCloses
+363:             .filter(s => s.is_withdrawn)
+364:             .map(s => ({
+365:                 id: s.id,
+366:                 created_at: s.created_at,
+367:                 operator: s.operator,
+368:                 withdrawn_by_name: s.withdrawn_by_name,
+369:                 type: 'Cierre de Turno',
+370:                 amount: s.total_in_cash - s.staying_in_cash,
+371:                 detail: `Total recaudado: ${formatCurrency(s.total_in_cash)}`,
+372:                 total_in_cash: s.total_in_cash,
+373:                 staying_in_cash: s.staying_in_cash,
+374:                 rendered_amount: s.total_in_cash - s.staying_in_cash,
+375:             }));
+376:                 const partials: UnifiedWithdrawn[] = partialCloses
+377:             .filter(p => p.is_withdrawn && normalizeMovementType(p.movement_type) === 'withdrawal')
+378:             .map(p => {
+379:                 return {
+380:                     id: p.id,
+381:                     created_at: p.created_at,
+382:                     operator: p.operator,
+383:                     withdrawn_by_name: p.withdrawn_by_name,
+384:                     type: 'Retiro Parcial',
+385:                     amount: p.amount,
+386:                     detail: buildPartialCloseDetail(p.recipient_name, p.notes),
+387:                 }
+388:             });
+389:         const combined = [...shifts, ...partials]
+390:             .filter(item => {
+391:                 const matchesSearch = !searchTerm ||
+392:                     (item.operator || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+393:                     (item.withdrawn_by_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+394:                 const itemDate = new Date(item.created_at);
+395:                 const matchesFrom = !dateFrom || itemDate >= new Date(dateFrom);
+396:                 const matchesTo = !dateTo || itemDate <= new Date(dateTo + 'T23:59:59');
+397:                 return matchesSearch && matchesFrom && matchesTo;
+398:             });
+399:         return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+400:     }, [shiftCloses, partialCloses, searchTerm, dateFrom, dateTo]);
+401: 
+402:     // --- Cómputo Rows ---
+403:     const computoRows = useMemo(() => {
+404:         // Sort shift closes ascending to calculate "Abre Caja Con" correctly
+405:         const sorted = [...shiftCloses].sort(
+406:             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+407:         );
+408: 
+409:         const rows = sorted.map((sc, i) => {
+410:             const inicio = i === 0 ? 0 : new Date(sorted[i - 1].created_at).getTime();
+411:             const fin = new Date(sc.created_at).getTime();
+412: 
+413:             // Filter movements: > previo && <= actual
+414:             const turnoMovements = movements.filter(m => {
+415:                 const t = new Date(m.timestamp).getTime();
+416:                 return t > inicio && t <= fin;
+417:             });
+418: 
+419:             // Filter partial closes: > previo && <= actual
+420:             const turnoPartials = partialCloses.filter(p => {
+421:                 const t = new Date(p.created_at).getTime();
+422:                 return t > inicio && t <= fin;
+423:             });
+424: 
+425:             const facturacionBank = turnoMovements
+426:                 .filter(m => (m.payment_method || '').toUpperCase() !== 'EFECTIVO')
+427:                 .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+428: 
+429:             const cobroEFT = turnoMovements
+430:                 .filter(m => (m.payment_method || '').toUpperCase() === 'EFECTIVO')
+431:                 .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+432: 
+433:             const facturacionTotal = facturacionBank + cobroEFT;
+434: 
+435:             const abreCajaCon = i === 0 ? 0 : Number(sorted[i - 1].staying_in_cash || 0);
+436:             const dejaEnCaja = Number(sc.staying_in_cash || 0);
+437:             const cierreDeCaja = Number(sc.total_in_cash || 0) - dejaEnCaja;
+438: 
+439:             const retirosParciales = turnoPartials
+440:                 .filter(p => normalizeMovementType(p.movement_type) === 'withdrawal')
+441:                 .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+442:             
+443:             const egresos = turnoPartials
+444:                 .filter(p => normalizeMovementType(p.movement_type) === 'expense')
+445:                 .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+446:             
+447:             const movimientosParciales = retirosParciales + egresos;
+448: 
+449:             const totalOperador = cierreDeCaja + movimientosParciales;
+450:             const totalSistema = cobroEFT + abreCajaCon - dejaEnCaja;
+451:             const resultado = totalOperador - totalSistema;
+452: 
+453:             return {
+454:                 id: sc.id,
+455:                 fecha: sc.created_at,
+456:                 operador: sc.operator,
+457:                 facturacionBank,
+458:                 cobroEFT,
+459:                 facturacionTotal,
+460:                 abreCajaCon,
+461:                 dejaEnCaja,
+462:                 cierreDeCaja,
+463:                 retirosParciales,
+464:                 egresos,
+465:                 movimientosParciales,
+466:                 totalOperador,
+467:                 totalSistema,
+468:                 resultado,
+469:             };
+470:         });
+471: 
+472:         // Display descending (most recent first), then apply filters
+473:         return rows.reverse().filter(row => {
+474:             const matchesSearch = !searchTerm ||
+475:                 (row.operador || '').toLowerCase().includes(searchTerm.toLowerCase());
+476:             const rowDate = new Date(row.fecha);
+477:             const matchesFrom = !dateFrom || rowDate >= new Date(dateFrom);
+478:             const matchesTo = !dateTo || rowDate <= new Date(dateTo + 'T23:59:59');
+479:             return matchesSearch && matchesFrom && matchesTo;
+480:         });
+481:     }, [shiftCloses, partialCloses, movements, searchTerm, dateFrom, dateTo]);
+482: 
+483:     const tabs: { key: TabKey; label: string; icon: React.ElementType; count?: number; customActiveColors?: string; customBadgeColors?: string; }[] = [
+484:         { key: 'computo', label: 'Cómputo', icon: Calculator },
+485:         { key: 'shifts', label: 'Cierres de Turno', icon: Clock, count: pendingShifts.length },
+486:         { key: 'partials', label: 'Retiros Parciales', icon: ArrowDownCircle, count: pendingWithdrawals.length },
+487:         { 
+488:             key: 'expenses', 
+489:             label: 'Egresos', 
+490:             icon: ReceiptText, 
+491:             count: expenseRows.length,
+492:             customActiveColors: 'border-red-600 text-red-700 bg-white',
+493:             customBadgeColors: 'bg-red-100 text-red-700'
+494:         },
+495:         { key: 'history', label: 'Historial', icon: History },
+496:     ];
+497: 
+498:     if (loading) {
+499:         return (
+500:             <div className="flex h-full items-center justify-center">
+501:                 <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+502:             </div>
+503:         );
+504:     }
+505: 
+506:     return (
+507:         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+508:             <SectionHeader title="Cierres de Caja" icon={Banknote} iconColor="emerald" />
+509: 
+510:             {/* Error Banner */}
+511:             {error && (
+512:                 <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
+513:                     <AlertCircle className="h-4 w-4 flex-shrink-0" />
+514:                     {error}
+515:                 </div>
+516:             )}
+517: 
+518:             {/* Filters Bar */}
+519:             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+520:                 <div className="relative flex-1 min-w-0">
+521:                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+522:                     <input
+523:                         type="text"
+524:                         placeholder="Buscar por operador..."
+525:                         value={searchTerm}
+526:                         onChange={e => setSearchTerm(e.target.value)}
+527:                         className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+528:                     />
+529:                 </div>
+530:                 <div className="flex items-center gap-2 flex-shrink-0">
+531:                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Desde</label>
+532:                     <input
+533:                         type="date"
+534:                         value={dateFrom}
+535:                         onChange={e => setDateFrom(e.target.value)}
+536:                         className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+537:                     />
+538:                 </div>
+539:                 <div className="flex items-center gap-2 flex-shrink-0">
+540:                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Hasta</label>
+541:                     <input
+542:                         type="date"
+543:                         value={dateTo}
+544:                         onChange={e => setDateTo(e.target.value)}
+545:                         className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+546:                     />
+547:                 </div>
+548:             </div>
+549: 
+550:             {/* Tabs */}
+551:             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+552:                 {/* Tab Header */}
+553:                 <div className="flex items-stretch border-b border-slate-200 bg-slate-50/50">
+554:                     <div className="flex flex-1 min-w-0 overflow-x-auto scrollbar-hide">
+555:                         {tabs.map(tab => {
+556:                             const Icon = tab.icon;
+557:                             const isActive = activeTab === tab.key;
+558:                             return (
+559:                                 <button
+560:                                     key={tab.key}
+561:                                     onClick={() => setActiveTab(tab.key)}
+562:                                     className={`flex items-center gap-2 px-5 py-3.5 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
+563:                                         isActive
+564:                                             ? tab.customActiveColors || 'border-emerald-600 text-emerald-700 bg-white'
+565:                                             : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+566:                                         }`}
+567:                                 >
+568:                                     <Icon className={`h-4 w-4 ${isActive ? (tab.customActiveColors ? 'text-red-600' : 'text-emerald-600') : 'text-slate-400'}`} />
+569:                                     {tab.label}
+570:                                     {tab.count !== undefined && tab.count > 0 && (
+571:                                         <span className={`inline-flex items-center justify-center text-[10px] font-black px-1.5 py-0.5 rounded-full ${
+572:                                             isActive 
+573:                                                 ? tab.customBadgeColors || 'bg-emerald-100 text-emerald-700' 
+574:                                                 : 'bg-slate-200 text-slate-600'
+575:                                         }`}>
+576:                                             {tab.count}
+577:                                         </span>
+578:                                     )}
+579:                                 </button>
+580:                             );
+581:                         })}
+582:                     </div>
+583:                     {activeTab === 'expenses' && (
+584:                         <div className="flex-shrink-0 flex items-center pr-2 pl-2 md:pr-4 border-l border-slate-200/60 bg-slate-50">
+585:                             <button
+586:                                 onClick={() => setIsExpenseModalOpen(true)}
+587:                                 className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs md:text-sm rounded-xl transition-colors shadow-sm"
+588:                             >
+589:                                 <Plus className="h-4 w-4" />
+590:                                 <span className="hidden sm:inline">Agregar Gasto</span>
+591:                                 <span className="sm:hidden">Gasto</span>
+592:                             </button>
+593:                         </div>
+594:                     )}
+595:                 </div>
+596: 
+597:                 {/* Tab: Cómputo */}
+598:                 {activeTab === 'computo' && (
+599:                     <div className="animate-in fade-in overflow-x-auto md:overflow-visible">
+600:                         <table className="w-full text-sm text-left">
+601:                             <colgroup className="hidden md:table-column-group">
+602:                                 <col style={{ width: '14%' }} />
+603:                                 <col style={{ width: '18%' }} />
+604:                                 <col style={{ width: '17%' }} />
+605:                                 <col style={{ width: '17%' }} />
+606:                                 <col style={{ width: '14%' }} />
+607:                                 <col style={{ width: '20%' }} />
+608:                             </colgroup>
+609:                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold hidden md:table-header-group">
+610:                                 <tr>
+611:                                     <th scope="col" className="px-3 py-3 text-center">Turno</th>
+612:                                     <th scope="col" className="px-3 py-3 text-center">Facturación y cobros</th>
+613:                                     <th scope="col" className="px-3 py-3 text-center">Caja</th>
+614:                                     <th scope="col" className="px-3 py-3 text-center">Mov. parciales</th>
+615:                                     <th scope="col" className="px-3 py-3 text-center">Conciliación</th>
+616:                                     <th scope="col" className="px-3 py-3 text-center">Resultado</th>
+617:                                 </tr>
+618:                             </thead>
+619:                             <tbody className="divide-y divide-slate-100 relative block md:table-row-group p-3 md:p-0 bg-slate-50/30 md:bg-transparent">
+620:                                 {computoRows.length === 0 && (
+621:                                     <tr className="block md:table-row">
+622:                                         <td colSpan={6} className="px-5 py-12 text-center block md:table-cell">
+623:                                             <Calculator className="h-10 w-10 text-slate-300 mx-auto mb-3" />
+624:                                             <p className="text-slate-400 font-medium">No hay cómputos disponibles.</p>
+625:                                         </td>
+626:                                     </tr>
+627:                                 )}
+628:                                 {computoRows.map(row => {
+629:                                     const operadorDisplay = row.operador || null;
+630:                                     return (
+631:                                         <React.Fragment key={row.id}>
+632:                                             <tr className="md:hidden block bg-white border border-slate-200 rounded-xl mb-4 p-4 shadow-sm hover:bg-slate-50 transition-colors">
+633:                                                 <td className="block space-y-4">
+634:                                                     <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+635:                                                         <div>
+636:                                                             <div className="font-bold text-slate-800 text-sm">
+637:                                                                 {operadorDisplay || <span className="italic text-slate-400">Sin nombre</span>}
+638:                                                             </div>
+639:                                                             <div className="text-xs text-slate-500 mt-0.5">
+640:                                                                 {formatDateOnly(row.fecha)} a las {formatTime24h(row.fecha)}
+641:                                                             </div>
+642:                                                         </div>
+643:                                                         <div className={`px-2.5 py-1 rounded-lg border font-black text-xs ${row.resultado < 0 ? 'text-red-700 bg-red-50 border-red-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
+644:                                                             {formatCurrency(row.resultado)}
+645:                                                         </div>
+646:                                                     </div>
+647:                                                     <div className="grid grid-cols-2 gap-4">
+648:                                                         <div>
+649:                                                             <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Facturación</div>
+650:                                                             <MetricLine label="Banco" value={formatCurrency(row.facturacionBank)} />
+651:                                                             <MetricLine label="Efectivo" value={formatCurrency(row.cobroEFT)} />
+652:                                                             <MetricLine label="Total" value={formatCurrency(row.facturacionTotal)} bold separator />
+653:                                                         </div>
+654:                                                         <div>
+655:                                                             <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Caja</div>
+656:                                                             <MetricLine label="Abre con" value={formatCurrency(row.abreCajaCon)} />
+657:                                                             <MetricLine label="Deja" value={formatCurrency(row.dejaEnCaja)} />
+658:                                                             <MetricLine label="Cierre" value={formatCurrency(row.cierreDeCaja)} bold separator />
+659:                                                         </div>
+660:                                                         <div>
+661:                                                             <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Mov. Parciales</div>
+662:                                                             <MetricLine label="Retiros" value={formatCurrency(row.retirosParciales)} colorClass="text-slate-500" />
+663:                                                             <MetricLine label="Egresos" value={formatCurrency(row.egresos)} colorClass="text-red-500" />
+664:                                                             <MetricLine label="Total" value={formatCurrency(row.movimientosParciales)} bold separator />
+665:                                                         </div>
+666:                                                         <div>
+667:                                                             <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Conciliación</div>
+668:                                                             <MetricLine label="Operador" value={formatCurrency(row.totalOperador)} />
+669:                                                             <MetricLine label="Sistema" value={formatCurrency(row.totalSistema)} />
+670:                                                         </div>
+671:                                                     </div>
+672:                                                 </td>
+673:                                             </tr>
+674:                                             <tr className="hidden md:table-row group hover:bg-slate-50/70 transition-colors">
+675:                                                 {/* 1. TURNO */}
+676:                                                 <td className="px-3 py-3">
+677:                                                     <div className="space-y-0.5">
+678:                                                         <div className="text-xs text-slate-400 tabular-nums">{formatDateOnly(row.fecha)}</div>
+679:                                                         <div className="text-xs text-slate-400 tabular-nums">{formatTime24h(row.fecha)}</div>
+680:                                                         {operadorDisplay ? (
+681:                                                             <div
+682:                                                                 className="text-xs font-semibold text-slate-800 truncate max-w-[130px]"
+683:                                                                 title={operadorDisplay}
+684:                                                             >
+685:                                                                 {operadorDisplay}
+686:                                                             </div>
+687:                                                         ) : (
+688:                                                             <div className="text-xs text-slate-400 italic">Sin nombre</div>
+689:                                                         )}
+690:                                                     </div>
+691:                                                 </td>
+692: 
+693:                                                 {/* 2. FACTURACIÓN Y COBROS */}
+694:                                                 <td className="px-3 py-3">
+695:                                                     <div className="space-y-0">
+696:                                                         <MetricLine label="Banco" value={formatCurrency(row.facturacionBank)} />
+697:                                                         <MetricLine label="Efectivo" value={formatCurrency(row.cobroEFT)} />
+698:                                                         <MetricLine
+699:                                                             label="Total"
+700:                                                             value={formatCurrency(row.facturacionTotal)}
+701:                                                             bold
+702:                                                             separator
+703:                                                         />
+704:                                                     </div>
+705:                                                 </td>
+706: 
+707:                                                 {/* 3. CAJA */}
+708:                                                 <td className="px-3 py-3">
+709:                                                     <div className="space-y-0">
+710:                                                         <MetricLine label="Abre con" value={formatCurrency(row.abreCajaCon)} />
+711:                                                         <MetricLine label="Deja en caja" value={formatCurrency(row.dejaEnCaja)} />
+712:                                                         <MetricLine
+713:                                                             label="Cierre"
+714:                                                             value={formatCurrency(row.cierreDeCaja)}
+715:                                                             bold
+716:                                                             separator
+717:                                                         />
+718:                                                     </div>
+719:                                                 </td>
+720: 
+721:                                                 {/* 4. MOVIMIENTOS PARCIALES */}
+722:                                                 <td className="px-3 py-3">
+723:                                                     <div className="space-y-0">
+724:                                                         <MetricLine
+725:                                                             label="Retiros"
+726:                                                             value={formatCurrency(row.retirosParciales)}
+727:                                                             colorClass="text-slate-500"
+728:                                                         />
+729:                                                         <MetricLine
+730:                                                             label="Egresos"
+731:                                                             value={formatCurrency(row.egresos)}
+732:                                                             colorClass="text-red-500"
+733:                                                         />
+734:                                                         <MetricLine
+735:                                                             label="Total"
+736:                                                             value={formatCurrency(row.movimientosParciales)}
+737:                                                             bold
+738:                                                             separator
+739:                                                         />
+740:                                                     </div>
+741:                                                 </td>
+742: 
+743:                                                 {/* 5. CONCILIACIÓN */}
+744:                                                 <td className="px-3 py-3">
+745:                                                     <div className="space-y-0">
+746:                                                         <MetricLine label="Operador" value={formatCurrency(row.totalOperador)} />
+747:                                                         <MetricLine label="Sistema" value={formatCurrency(row.totalSistema)} />
+748:                                                     </div>
+749:                                                 </td>
+750: 
+751:                                                 {/* 6. RESULTADO */}
+752:                                                 <td className="px-3 py-3 text-center">
+753:                                                     <span className={`inline-flex items-center justify-center font-black text-xs px-3 py-1.5 rounded-lg border tabular-nums whitespace-nowrap ${
+754:                                                         row.resultado < 0
+755:                                                             ? 'text-red-700 bg-red-50 border-red-200'
+756:                                                             : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+757:                                                     }`}>
+758:                                                         {formatCurrency(row.resultado)}
+759:                                                     </span>
+760:                                                 </td>
+761:                                             </tr>
+762:                                         </React.Fragment>
+763:                                     );
+764:                                 })}
+765:                             </tbody>
+766:                         </table>
+767:                     </div>
+768:                 )}
+769: 
+770:                 {/* Tab: Cierres de Turno */}
+771:                 {activeTab === 'shifts' && (
+772:                     <div className="animate-in fade-in overflow-x-auto md:overflow-visible">
+773:                         <table className="w-full text-sm text-left">
+774:                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold hidden md:table-header-group">
+775:                                 <tr>
+776:                                     <th scope="col" className="px-5 py-3">Fecha</th>
+777:                                     <th scope="col" className="px-5 py-3">Operador</th>
+778:                                     <th scope="col" className="px-5 py-3 text-right">Total Recaudado</th>
+779:                                     <th scope="col" className="px-5 py-3 text-right">Dejó en Caja</th>
+780:                                     <th scope="col" className="px-5 py-3 text-right">Total Rendido</th>
+781:                                     <th scope="col" className="px-5 py-3 text-center">Acción</th>
+782:                                 </tr>
+783:                             </thead>
+784:                             <tbody className="divide-y divide-slate-100 block md:table-row-group p-3 md:p-0 bg-slate-50/30 md:bg-transparent">
+785:                                 {pendingShifts.length === 0 && (
+786:                                     <tr className="block md:table-row">
+787:                                         <td colSpan={6} className="px-5 py-12 text-center block md:table-cell">
+788:                                             <CheckCircle2 className="h-10 w-10 text-emerald-300 mx-auto mb-3" />
+789:                                             <p className="text-slate-400 font-medium">No hay cierres de turno pendientes de retiro.</p>
+790:                                         </td>
+791:                                     </tr>
+792:                                 )}
+793:                                 {pendingShifts.map(row => {
+794:                                     const totalRendido = row.total_in_cash - row.staying_in_cash;
+795:                                     const isWithdrawing = withdrawingId === row.id;
+796:                                     return (
+797:                                         <React.Fragment key={row.id}>
+798:                                             <tr className="md:hidden block bg-white border border-slate-200 rounded-xl mb-3 p-4 shadow-sm hover:bg-slate-50 transition-colors">
+799:                                                 <td className="block space-y-3">
+800:                                                     <div className="flex justify-between items-start">
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

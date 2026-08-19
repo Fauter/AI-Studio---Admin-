@@ -1,0 +1,89 @@
+Created At: 2026-08-19T03:01:01-03:00
+Completed At: 2026-08-19T03:01:01-03:00
+File Path: `file:///c:/Users/lmfau/OneDrive/Escritorio/Code/ZZZ/AI%20Studio%20Admin/pages/CashClosuresPage.tsx`
+Total Lines: 640
+Total Bytes: 38483
+Showing lines 1 to 640
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useMemo } from 'react';
+2: import { useParams } from 'react-router-dom';
+3: import { supabase } from '../lib/supabase';
+4: import {
+5:     Banknote, Search, Loader2, AlertCircle,
+6:     CheckCircle2, Clock, History, ArrowDownCircle, ChevronRight, Calculator
+7: } from 'lucide-react';
+8: import SectionHeader from '../components/hub/SectionHeader';
+9: 
+10: // --- Interfaces ---
+11: interface ShiftClose {
+12:     id: string;
+13:     garage_id: string;
+14:     created_at: string;
+15:     operator: string | null;
+16:     total_in_cash: number;
+17:     staying_in_cash: number;
+18:     is_withdrawn: boolean;
+19:     withdrawn_by_name: string | null;
+20: }
+21: 
+22: interface PartialClose {
+23:     id: string;
+24:     garage_id: string;
+25:     created_at: string;
+26:     operator: string | null;
+27:     amount: number;
+28:     recipient_name: string | null;
+29:     notes: string | null;
+30:     is_withdrawn: boolean;
+31:     withdrawn_by_name: string | null;
+32: }
+33: 
+34: interface Movement {
+35:     id: string;
+36:     garage_id: string;
+37:     amount: number;
+38:     payment_method?: string;
+39:     timestamp: string;
+40: }
+41: 
+42: type UnifiedWithdrawn = {
+43:     id: string;
+44:     created_at: string;
+45:     operator: string | null;
+46:     withdrawn_by_name: string | null;
+47:     type: 'Cierre de Turno' | 'Retiro Parcial';
+48:     amount: number;
+49:     detail: string;
+50:     total_in_cash?: number;
+51:     staying_in_cash?: number;
+52:  
+<truncated 38053 bytes>
+className="text-sm font-bold text-slate-700">{formatCurrency(row.total_in_cash || 0)}</p>
+614:                                                             </div>
+615:                                                             <div>
+616:                                                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Dejó en Caja</p>
+617:                                                                 <p className="text-sm font-medium text-slate-500">{formatCurrency(row.staying_in_cash || 0)}</p>
+618:                                                             </div>
+619:                                                             <div>
+620:                                                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Rendido</p>
+621:                                                                 <span className="font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-xs inline-block">
+622:                                                                     {formatCurrency(row.rendered_amount || 0)}
+623:                                                                 </span>
+624:                                                             </div>
+625:                                                         </div>
+626:                                                     </td>
+627:                                                 </tr>
+628:                                             )}
+629:                                         </React.Fragment>
+630:                                     );
+631:                                 })}
+632:                             </tbody>
+633:                         </table>
+634:                     </div>
+635:                 )}
+636:             </div>
+637:         </div>
+638:     );
+639: }
+640: 
+The above content shows the entire, complete file contents of the requested file.

@@ -3,8 +3,8 @@ import { Wallet, TrendingUp, Building2, CreditCard, AlertCircle, Target, ArrowUp
 import { cn, formatCurrency, ProgressRing, VariationBadge } from './CashFlowShared';
 
 interface KpiGridProps {
-    kpiIngresos: { today: number; yesterday: number; variation: number };
-    kpiFacturacion: { current: number; previous: number; variation: number };
+    kpiIngresos: { today: number; yesterday: number; variation: number; expenses?: number };
+    kpiFacturacion: { current: number; previous: number; variation: number; expenses?: number };
     kpiOcupacion: { ocupadas: number; cocherasOcupadas: number; estadiasActivas: number; totalSpots: number; porcentaje: number };
     kpiSubs: { altas: number; bajas: number; total: number };
     kpiDeuda: { total: number; isAlert: boolean; count: number; uniqueDebtors: number };
@@ -14,6 +14,7 @@ interface KpiGridProps {
     setIsEficaciaModalOpen: (val: boolean) => void;
     setIsDailyIncomeModalOpen: (val: boolean) => void;
     setIsOccupancyModalOpen: (val: boolean) => void;
+    setIsSubscriptionsModalOpen: (val: boolean) => void;
 }
 
 export default function KpiGrid({
@@ -27,7 +28,8 @@ export default function KpiGrid({
     setIsDebtModalOpen,
     setIsEficaciaModalOpen,
     setIsDailyIncomeModalOpen,
-    setIsOccupancyModalOpen
+    setIsOccupancyModalOpen,
+    setIsSubscriptionsModalOpen
 }: KpiGridProps) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -72,16 +74,14 @@ export default function KpiGrid({
                 <p className="text-[9px] text-slate-400">{kpiOcupacion.cocherasOcupadas} fijas + {kpiOcupacion.estadiasActivas} estadías</p>
             </div>
             {/* Abonos */}
-            <div className="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <div onClick={() => setIsSubscriptionsModalOpen(true)}
+                className="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-violet-300 active:scale-[0.98] transition-all cursor-pointer">
                 <div className="flex items-center justify-between mb-3">
                     <div className="p-2 rounded-lg bg-violet-50 text-violet-600"><CreditCard className="h-4 w-4" /></div>
+                    <Eye className="h-3.5 w-3.5 text-slate-300" />
                 </div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Abonos Activos</p>
                 <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{kpiSubs.total}</p>
-                {/* <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-emerald-600 flex items-center gap-0.5"><ArrowUpRight className="h-2.5 w-2.5" />{kpiSubs.altas}</span>
-                    <span className="text-[10px] text-red-500 flex items-center gap-0.5"><ArrowDownRight className="h-2.5 w-2.5" />{kpiSubs.bajas}</span>
-                </div> */}
             </div>
             {/* Deuda */}
             <div onClick={() => kpiDeuda.count > 0 && setIsDebtModalOpen(true)}
@@ -116,3 +116,6 @@ export default function KpiGrid({
         </div>
     );
 }
+
+
+

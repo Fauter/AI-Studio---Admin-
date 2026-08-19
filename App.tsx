@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { MemoryRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
@@ -166,7 +166,8 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/" element={<RootDispatcher />} />
-      <Route path="/setup/onboarding" element={<OnboardingPage />} />
+      <Route path="/setup/onboarding" element={<Navigate to="/setup/onboarding/garages" replace />} />
+      <Route path="/setup/onboarding/:section" element={<OnboardingPage />} />
 
       {/* GLOBAL ADMIN ROUTES */}
       <Route path="/admin/global" element={<DashboardLayout />}>
@@ -199,9 +200,9 @@ const AppRoutes = () => {
 function App() {
   return (
     <AuthProvider>
-      <MemoryRouter>
+      <BrowserRouter>
         <AppRoutes />
-      </MemoryRouter>
+      </BrowserRouter>
     </AuthProvider>
   );
 }

@@ -32,6 +32,7 @@ import DebtModal from './cash-flow/modals/DebtModal';
 import EficaciaModal from './cash-flow/modals/EficaciaModal';
 import DailyIncomeModal from './cash-flow/modals/DailyIncomeModal';
 import OccupancyModal from './cash-flow/modals/OccupancyModal';
+import SubscriptionsModal from './cash-flow/modals/SubscriptionsModal';
 
 export type PeakMode = 'occupancy' | 'entries' | 'exits';
 
@@ -47,6 +48,8 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const { profile } = useAuth();
     const [activeSection, setActiveSection] = useState<ActiveSection>('resumen');
     const [peakMode, setPeakMode] = useState<PeakMode>('occupancy');
+    const [peakPeriod, setPeakPeriod] = useState<any>('last_30_days');
+    const [historicalChartView, setHistoricalChartView] = useState<any>('historical');
     const [selectedGarageId, setSelectedGarageId] = useState<string>('all');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState({
@@ -55,7 +58,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     });
 
     const {
-        movements, stays, allStays, vehicles, employees, subscriptions, debts,
+        movements, stays, allStays, vehicles, employees, subscriptions, debts, customers,
         cocheras, buildingLevels, expenses, tariffs, vehicleTypes, prices,
         loadingTier1: loading, loadingTier2, loadingProgress, loadingStep, error,
         fetchTier1, fetchTier2,
@@ -67,6 +70,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const [isEficaciaModalOpen, setIsEficaciaModalOpen] = useState(false);
     const [isDailyIncomeModalOpen, setIsDailyIncomeModalOpen] = useState(false);
     const [isOccupancyModalOpen, setIsOccupancyModalOpen] = useState(false);
+    const [isSubscriptionsModalOpen, setIsSubscriptionsModalOpen] = useState(false);
     const [eficaciaMonthOffset, setEficaciaMonthOffset] = useState(0);
     const [dailyIncomeMonthOffset, setDailyIncomeMonthOffset] = useState(0);
 
@@ -122,6 +126,23 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const gCocheras = useMemo(() => selectedGarageId === 'all' ? cocheras : cocheras.filter(c => c.garage_id === selectedGarageId), [cocheras, selectedGarageId]);
     const gLevels = useMemo(() => selectedGarageId === 'all' ? buildingLevels : buildingLevels.filter(l => l.garage_id === selectedGarageId), [buildingLevels, selectedGarageId]);
     const gExpenses = useMemo(() => selectedGarageId === 'all' ? expenses : expenses.filter(e => e.garage_id === selectedGarageId), [expenses, selectedGarageId]);
+
+    // For Subscriptions Modal (Needs all data independently of selectedGarageId)
+    const allActiveSubscriptions = useMemo(() => {
+        const uniqueSubsMap = new Map<string, Subscription>();
+        for (const sub of subscriptions) {
+            if (sub.id) uniqueSubsMap.set(sub.id, sub);
+        }
+        return Array.from(uniqueSubsMap.values()).filter(s => s.active === true);
+    }, [subscriptions]);
+
+    const allInactiveSubscriptions = useMemo(() => {
+        const uniqueSubsMap = new Map<string, Subscription>();
+        for (const sub of subscriptions) {
+            if (sub.id) uniqueSubsMap.set(sub.id, sub);
+        }
+        return Array.from(uniqueSubsMap.values()).filter(s => s.active === false);
+    }, [subscriptions]);
 
     // §4d. KPIs
     const kpiIngresos = useMemo(() => {
@@ -813,12 +834,17 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                             setIsEficaciaModalOpen={setIsEficaciaModalOpen}
                             setIsDailyIncomeModalOpen={setIsDailyIncomeModalOpen}
                             setIsOccupancyModalOpen={setIsOccupancyModalOpen}
+                            setIsSubscriptionsModalOpen={setIsSubscriptionsModalOpen}
                         />
                         <ChartsSection
                             revenueChartData={revenueChartData}
                             peakHoursData={peakHoursData}
                             peakMode={peakMode}
                             setPeakMode={setPeakMode}
+                            peakPeriod={peakPeriod}
+                            setPeakPeriod={setPeakPeriod}
+                            historicalChartView={historicalChartView}
+                            setHistoricalChartView={setHistoricalChartView}
                         />
                     </div>
                 )}
@@ -903,7 +929,22 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 cocheras={gCocheras}
                 activeStays={gStays}
             />
+
+            {/* 🔑 SUBSCRIPTIONS MODAL 🔑 */}
+            <SubscriptionsModal
+                isOpen={isSubscriptionsModalOpen}
+                onClose={() => setIsSubscriptionsModalOpen(false)}
+                activeSubscriptions={allActiveSubscriptions}
+                inactiveSubscriptions={allInactiveSubscriptions}
+                customers={customers as any}
+                vehicles={vehicles}
+                cocheras={cocheras as any}
+                garages={garages}
+                initialGarageId={selectedGarageId}
+            />
         </>
     );
 }
+
+
 

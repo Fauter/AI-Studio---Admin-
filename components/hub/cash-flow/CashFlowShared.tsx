@@ -39,13 +39,8 @@ export interface Stay {
 
 export interface Customer {
     id: string;
-    garage_id: string;
     name: string;
     dni?: string;
-    phone?: string;
-    email?: string;
-    address?: string;
-    localidad?: string;
 }
 
 export interface Subscription {
@@ -242,3 +237,7 @@ export function OperationClock() {
         </div>
     );
 }
+
+export type PeakMode = "occupancy" | "entries" | "exits";
+export type PeakPeriod = "today" | "7_days" | "15_days" | "30_days" | "60_days" | "90_days";
+export type ChartView = "historical" | "hourly-profile";

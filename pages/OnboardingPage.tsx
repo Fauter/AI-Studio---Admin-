@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Building2,
   MapPin,
@@ -696,7 +696,8 @@ type HubSection = 'cashflow' | 'garages' | 'access';
 export default function OnboardingPage() {
   const { user, signOut, shadowUser, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<HubSection>('garages');
+  const { section } = useParams<{ section: string }>();
+  const activeTab = (section as HubSection) || 'garages';
   const [garages, setGarages] = useState<Garage[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -771,10 +772,12 @@ export default function OnboardingPage() {
 
   // Auto-switch tab if current one is not allowed
   useEffect(() => {
+    if (authLoading || loading) return;
     if (!allowedTabs.find(t => t.id === activeTab)) {
-      setActiveTab(allowedTabs[0]?.id as HubSection || 'garages');
+      const defaultTab = allowedTabs[0]?.id || 'garages';
+      navigate(`/setup/onboarding/${defaultTab}`, { replace: true });
     }
-  }, [allowedTabs, activeTab]);
+  }, [allowedTabs, activeTab, authLoading, loading, navigate]);
 
   if (loading || authLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><Loader2 className="h-8 w-8 animate-spin text-indigo-600" /></div>;
 
@@ -794,7 +797,7 @@ export default function OnboardingPage() {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id as HubSection)} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all", isActive ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-900")}>
+                <button key={tab.id} onClick={() => navigate(`/setup/onboarding/${tab.id}`)} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all", isActive ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-900")}>
                   <Icon className={cn("h-4 w-4", isActive ? "text-indigo-600" : "text-slate-400")} />
                   <span className="hidden sm:inline">{tab.label}</span>
                 </button>

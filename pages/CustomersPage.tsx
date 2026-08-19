@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import {
@@ -102,6 +102,32 @@ const getVehicleColorStyles = (colorKey: string): string => {
     }
 };
 
+// --- Search Normalization Helpers ---
+
+/**
+ * Normalizes text for general search (names, descriptions).
+ * Handles null/undefined, trims, lowercases, removes diacritics,
+ * and collapses repeated whitespace.
+ */
+const normalizeSearchText = (value: string | null | undefined): string => {
+    if (value == null) return '';
+    return value
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+};
+
+/**
+ * Normalizes identifiers (DNI, plates) for search.
+ * Uses normalizeSearchText as base, then strips spaces, hyphens,
+ * dots, and any non-alphanumeric character.
+ */
+const normalizeIdentifier = (value: string | null | undefined): string => {
+    return normalizeSearchText(value).replace(/[^a-z0-9]/g, '');
+};
+
 // --- Smart Capitalization ---
 const smartCapitalize = (text: string): string => {
     if (!text) return '';
@@ -113,37 +139,18 @@ const smartCapitalize = (text: string): string => {
     return text;
 };
 
-import { Subscription as SharedSubscription } from '../components/hub/cash-flow/CashFlowShared';
-
-export type CustomerPageSubscription = Pick<
-    SharedSubscription,
-    'id' | 'garage_id' | 'customer_id' | 'vehicle_id' | 'type' | 'start_date' | 'end_date' | 'price' | 'active'
->;
-
-type TabType = 'profile' | 'assets' | 'finance' | 'history';
-
-// --- Utility Functions ---
-const normalizeSearchText = (value: string | null | undefined): string => {
-    if (value == null) return '';
-    return value
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ');
-};
-
-const normalizeIdentifier = (value: string | null | undefined): string => {
-    return normalizeSearchText(value).replace(/[^a-z0-9]/g, '');
-};
-
-
-
-interface ResolvedCocheraVehicle {
-    plate: string;
-    normalizedPlate: string;
-    vehicle: Vehicle | null;
+interface Subscription {
+    id: string;
+    customer_id: string;
+    vehicle_id: string | null;
+    start_date: string;
+    end_date: string | null;
+    price: number;
+    active: boolean;
+    documents_metadata: any;
 }
+
+type TabType = 'profile' | 'assets' | 'finance' | 'history' | 'documentation';
 
 export default function CustomersPage() {
     const { garageId } = useParams<{ garageId: string }>();
@@ -154,7 +161,7 @@ export default function CustomersPage() {
     const [debts, setDebts] = useState<Debt[]>([]);
     const [cocheras, setCocheras] = useState<Cochera[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-    const [subscriptions, setSubscriptions] = useState<CustomerPageSubscription[]>([]);
+    const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
     const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeRecord[]>([]);
 
     const [searchTerm, setSearchTerm] = useState('');
@@ -167,7 +174,13 @@ export default function CustomersPage() {
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-    const [loadError, setLoadError] = useState<string | null>(null);
+    const detailScrollRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        if (selectedCustomer?.id && detailScrollRef.current) {
+            detailScrollRef.current.scrollTo({ top: 0 });
+        }
+    }, [selectedCustomer?.id]);
 
     // --- Fetch Data ---
     useEffect(() => {
@@ -175,27 +188,7 @@ export default function CustomersPage() {
 
         const fetchData = async () => {
             setLoading(true);
-            setLoadError(null);
             try {
-                const fetchPaginated = async <T,>(table: string, select = '*', extraFilter?: (query: any) => any): Promise<T[]> => {
-                    const PAGE_SIZE = 1000;
-                    let all: T[] = [];
-                    let from = 0;
-                    let keepFetching = true;
-                    while (keepFetching) {
-                        let query = supabase.from(table).select(select).eq('garage_id', garageId).range(from, from + PAGE_SIZE - 1);
-                        if (extraFilter) query = extraFilter(query);
-                        
-                        const { data, error } = await query;
-                        if (error) throw error;
-                        const rows = (data || []) as T[];
-                        all = all.concat(rows);
-                        if (rows.length < PAGE_SIZE) keepFetching = false;
-                        else from += PAGE_SIZE;
-                    }
-                    return all;
-                };
-
                 const [
                     customersRes,
                     debtsRes,
@@ -204,29 +197,25 @@ export default function CustomersPage() {
                     subsRes,
                     vehicleTypesRes
                 ] = await Promise.all([
-                    fetchPaginated<Customer>('customers', 'id, garage_id, name, dni, email, phone, work_phone, emergency_phone, address, localidad'),
-                    fetchPaginated<Debt>('debts', 'id, subscription_id, customer_id, garage_id, amount, status, due_date, created_at, updated_at, type, remaining_amount, amount_paid', q => q.eq('status', 'PENDING')),
-                    fetchPaginated<Cochera>('cocheras', 'id, garage_id, tipo, numero, cliente_id, status, precio_base, vehiculos'),
-                    fetchPaginated<Vehicle>('vehicles', 'id, garage_id, customer_id, plate, type, brand, model, photos, is_subscriber'),
-                    fetchPaginated<CustomerPageSubscription>('subscriptions', 'id, garage_id, customer_id, vehicle_id, type, start_date, end_date, price, active'),
-                    fetchPaginated<VehicleTypeRecord>('vehicle_types', 'id, garage_id, name, icon_key, color_key'),
+                    supabase.from('customers').select('*').eq('garage_id', garageId),
+                    supabase.from('debts').select('*').eq('garage_id', garageId).eq('status', 'PENDING'),
+                    supabase.from('cocheras').select('*').eq('garage_id', garageId),
+                    supabase.from('vehicles').select('*').eq('garage_id', garageId),
+                    supabase.from('suscriptions').select('id, customer_id, vehicle_id, start_date, end_date, price, active, documents_metadata').eq('garage_id', garageId),
+                    supabase.from('vehicle_types').select('*').eq('garage_id', garageId),
                 ]);
 
-                setCustomers(customersRes || []);
-                setDebts(debtsRes || []);
-                setCocheras(cocherasRes || []);
-                
-                // Deduplicate vehicles by ID just in case
-                const uniqueVehicles = new Map<string, Vehicle>();
-                vehiclesRes.forEach(v => uniqueVehicles.set(v.id, v));
-                setVehicles(Array.from(uniqueVehicles.values()));
-                
-                setSubscriptions(subsRes || []);
-                setVehicleTypes(vehicleTypesRes || []);
+                if (customersRes.error) throw customersRes.error;
+
+                setCustomers(customersRes.data as Customer[] || []);
+                setDebts(debtsRes.data as Debt[] || []);
+                setCocheras(cocherasRes.data as Cochera[] || []);
+                setVehicles(vehiclesRes.data as Vehicle[] || []);
+                setSubscriptions(subsRes.data as Subscription[] || []);
+                setVehicleTypes(vehicleTypesRes.data as VehicleTypeRecord[] || []);
 
             } catch (err: any) {
                 console.error("Error fetching customers data:", err);
-                setLoadError(err.message || 'Error desconocido al cargar datos');
             } finally {
                 setLoading(false);
             }
@@ -235,15 +224,89 @@ export default function CustomersPage() {
         fetchData();
     }, [garageId]);
 
+    // --- Plate Search Index ---
+    // Maps customer.id → Set of normalized plates from cocheras.vehiculos
+    // with vehiculo_id → vehicles.plate as fallback.
+    const customerPlateSearchIndex = useMemo(() => {
+        const index = new Map<string, Set<string>>();
+
+        // Build a vehicle lookup by ID for O(1) resolution of vehiculo_id
+        const vehicleById = new Map<string, Vehicle>();
+        for (const v of vehicles) {
+            vehicleById.set(v.id, v);
+        }
+
+        for (const cochera of cocheras) {
+            if (!cochera.cliente_id) continue;
+
+            let plates = index.get(cochera.cliente_id);
+            if (!plates) {
+                plates = new Set<string>();
+                index.set(cochera.cliente_id, plates);
+            }
+
+            // Primary source: cochera.vehiculos[]
+            if (Array.isArray(cochera.vehiculos)) {
+                for (const raw of cochera.vehiculos) {
+                    if (raw == null || typeof raw !== 'string') continue;
+                    const normalized = normalizeIdentifier(raw);
+                    if (normalized) plates.add(normalized);
+                }
+            }
+
+            // Fallback: cochera.vehiculo_id → vehicles.plate
+            if (cochera.vehiculo_id) {
+                const vehicle = vehicleById.get(cochera.vehiculo_id);
+                if (vehicle?.plate) {
+                    const normalized = normalizeIdentifier(vehicle.plate);
+                    if (normalized) plates.add(normalized);
+                }
+            }
+        }
+
+        return index;
+    }, [cocheras, vehicles]);
+
     // --- Memos & Derived State ---
     const filteredCustomers = useMemo(() => {
-        if (!searchTerm) return customers;
-        const lowerTerm = searchTerm.toLowerCase();
-        return customers.filter(c =>
-            c.name?.toLowerCase().includes(lowerTerm) ||
-            c.dni?.toLowerCase().includes(lowerTerm)
-        );
-    }, [customers, searchTerm]);
+        const trimmed = searchTerm.trim();
+        if (!trimmed) return customers;
+
+        const normalizedTextTerm = normalizeSearchText(trimmed);
+        const normalizedIdentifierTerm = normalizeIdentifier(trimmed);
+
+        // Guard: if the term normalizes to empty (e.g. only symbols),
+        // return no results to prevent ''.includes('') matching everything.
+        if (!normalizedTextTerm && !normalizedIdentifierTerm) return [];
+
+        return customers.filter(customer => {
+            // Match by name
+            const matchesName = normalizedTextTerm
+                ? normalizeSearchText(customer.name).includes(normalizedTextTerm)
+                : false;
+
+            // Match by DNI
+            const matchesDni = normalizedIdentifierTerm
+                ? normalizeIdentifier(customer.dni).includes(normalizedIdentifierTerm)
+                : false;
+
+            // Match by plate (from customerPlateSearchIndex)
+            let matchesPlate = false;
+            if (normalizedIdentifierTerm) {
+                const plates = customerPlateSearchIndex.get(customer.id);
+                if (plates) {
+                    for (const plate of plates) {
+                        if (plate.includes(normalizedIdentifierTerm)) {
+                            matchesPlate = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return matchesName || matchesDni || matchesPlate;
+        });
+    }, [customers, searchTerm, customerPlateSearchIndex]);
 
     // Enriched Customer Data (for the table)
     const customersWithStats = useMemo(() => {
@@ -304,38 +367,12 @@ export default function CustomersPage() {
         const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
         return customerCocheras.map(cochera => {
-            let cocheraVehiclePlates: string[] = [];
-            if (Array.isArray(cochera.vehiculos)) {
-                cocheraVehiclePlates = cochera.vehiculos;
-            } else if (typeof cochera.vehiculos === 'string') {
-                try {
-                    const parsed = JSON.parse(cochera.vehiculos);
-                    if (Array.isArray(parsed)) cocheraVehiclePlates = parsed;
-                } catch (e) {
-                    cocheraVehiclePlates = [cochera.vehiculos];
-                }
-            } else if (cochera.vehiculo_id) {
-                const legacyV = vehicles.find(v => v.id === cochera.vehiculo_id);
-                if (legacyV?.plate) cocheraVehiclePlates = [legacyV.plate];
-            }
-
-            const resolvedVehicles: ResolvedCocheraVehicle[] = cocheraVehiclePlates
-                .filter(Boolean)
-                .map(plate => {
-                    const norm = normalizeIdentifier(plate);
-                    return {
-                        plate,
-                        normalizedPlate: norm,
-                        vehicle: vehicles.find(v => normalizeIdentifier(v.plate) === norm) || null
-                    };
-                });
-
-            const allVehicles = resolvedVehicles.map(rv => rv.vehicle).filter((v): v is Vehicle => v !== null);
+            const allVehicles = vehicles.filter(v => cochera.vehiculos?.includes(v.plate));
 
             let hasCanonDebt = false;
             let currentEndDate: string | null = null;
             let totalCocheraDebt = 0;
-            const owedMonthsRaw: { label: string, timestamp: number }[] = [];
+            const owedMonths: string[] = [];
             const cocheraDebtIds: string[] = [];
 
             // Iterate ALL vehicles and ALL subs (not just active — inactive subs can still have pending debts)
@@ -364,18 +401,12 @@ export default function CustomersPage() {
                             cocheraDebtIds.push(debt.id);
                             if (debt.due_date) {
                                 const [y, m] = debt.due_date.split('T')[0].split('-');
-                                owedMonthsRaw.push({
-                                    label: `${monthNames[parseInt(m, 10) - 1]} ${y}`,
-                                    timestamp: new Date(debt.due_date).getTime()
-                                });
+                                owedMonths.push(`${monthNames[parseInt(m, 10) - 1]} ${y}`);
                             }
                         }
                     }
                 }
             }
-            
-            owedMonthsRaw.sort((a, b) => a.timestamp - b.timestamp);
-            const owedMonths = owedMonthsRaw.map(x => x.label);
 
             // Doble Candado: Calendar expired OR has pending CANON debts
             const today = new Date();
@@ -383,7 +414,7 @@ export default function CustomersPage() {
             const calendarExpired = currentEndDate ? new Date(currentEndDate).getTime() < today.getTime() : false;
             const isVencida = calendarExpired || hasCanonDebt;
 
-            return { ...cochera, allVehicles, resolvedVehicles, isVencida, currentEndDate, totalCocheraDebt, owedMonths, cocheraDebtIds, calendarExpired };
+            return { ...cochera, allVehicles, isVencida, currentEndDate, totalCocheraDebt, owedMonths, cocheraDebtIds, calendarExpired };
         });
     }, [selectedCustomer, cocheras, vehicles, subscriptions, selectedDebts]);
 
@@ -457,15 +488,15 @@ export default function CustomersPage() {
     }
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 h-full flex flex-col">
+        <div className="flex flex-col gap-6 h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
             <SectionHeader title="Gestión de Abonados" icon={Users} iconColor="indigo" />
 
-            <div className="flex gap-6 flex-1 h-[calc(100vh-140px)] overflow-hidden">
+            <div className="flex gap-6 flex-1 min-h-0 min-w-0 overflow-hidden">
 
                 {/* MAIN LIST VIEW */}
                 <div className={cn(
-                    "bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all duration-300",
-                    selectedCustomer ? "w-1/3 hidden lg:flex" : "w-full"
+                    "bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all duration-300 min-h-0 min-w-0 overflow-hidden",
+                    selectedCustomer ? "w-full lg:w-[360px] xl:w-[380px] shrink-0 hidden lg:flex" : "w-full flex-1"
                 )}>
                     {/* Header & Search */}
                     <div className="p-4 border-b border-slate-100 bg-slate-50/50">
@@ -473,7 +504,8 @@ export default function CustomersPage() {
                             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                             <input
                                 type="text"
-                                placeholder="Buscar por Nombre o DNI..."
+                                placeholder="Buscar por nombre, DNI o patente..."
+                                aria-label="Buscar abonado por nombre, DNI o patente"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
@@ -482,14 +514,14 @@ export default function CustomersPage() {
                     </div>
 
                     {/* Table / List */}
-                    <div className="flex-1 overflow-auto">
-                        <table className="w-full text-sm text-left">
+                    <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain">
+                        <table className="w-full text-sm text-left table-fixed">
                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold sticky top-0 z-10 shadow-sm">
                                 <tr>
-                                    <th className="px-5 py-3">Cliente</th>
-                                    {!selectedCustomer && <th className="px-5 py-3">Contacto</th>}
-                                    {!selectedCustomer && <th className="px-5 py-3 text-center">Cocheras</th>}
-                                    <th className="px-5 py-3 text-right">Deuda</th>
+                                    <th className="px-3 md:px-4 py-3">Cliente</th>
+                                    {!selectedCustomer && <th className="px-4 py-3 hidden sm:table-cell">Contacto</th>}
+                                    {!selectedCustomer && <th className="px-4 py-3 text-center hidden md:table-cell">Cocheras</th>}
+                                    <th className={cn("py-3 text-right", selectedCustomer ? "px-3 md:px-4 w-[90px]" : "px-3 md:px-4")}>Deuda</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
@@ -502,49 +534,49 @@ export default function CustomersPage() {
                                             selectedCustomer?.id === customer.id ? "bg-indigo-50" : "hover:bg-slate-50/80"
                                         )}
                                     >
-                                        <td className="px-5 py-3">
-                                            <div className="flex items-center gap-3">
+                                        <td className="px-3 md:px-4 py-2.5 min-w-0">
+                                            <div className="flex items-center gap-3 min-w-0">
                                                 <div className={cn(
-                                                    "h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs transition-colors",
+                                                    "h-8 w-8 rounded-full flex items-center justify-center shrink-0 font-bold text-xs transition-colors",
                                                     selectedCustomer?.id === customer.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 group-hover:bg-indigo-100 group-hover:text-indigo-700"
                                                 )}>
                                                     {customer.name?.charAt(0).toUpperCase() || 'C'}
                                                 </div>
-                                                <div>
-                                                    <p className={cn("font-bold truncate max-w-[150px]", selectedCustomer?.id === customer.id ? "text-indigo-900" : "text-slate-800")}>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className={cn("font-bold truncate", selectedCustomer?.id === customer.id ? "text-indigo-900" : "text-slate-800")} title={customer.name || ''}>
                                                         {customer.name}
                                                     </p>
-                                                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">DNI {customer.dni || 'S/N'}</p>
+                                                    <p className="text-[11px] text-slate-400 font-mono mt-0.5 truncate" title={customer.dni || ''}>DNI {customer.dni || 'S/N'}</p>
                                                 </div>
                                             </div>
                                         </td>
 
                                         {!selectedCustomer && (
-                                            <td className="px-5 py-3 text-slate-500 text-xs">
-                                                <p className="truncate max-w-[150px]">{customer.phone || '-'}</p>
-                                                <p className="truncate max-w-[150px] text-[11px]">{customer.email || '-'}</p>
+                                            <td className="px-4 py-2.5 text-slate-500 text-xs min-w-0 hidden sm:table-cell">
+                                                <p className="truncate" title={customer.phone || ''}>{customer.phone || '-'}</p>
+                                                <p className="truncate text-[11px]" title={customer.email || ''}>{customer.email || '-'}</p>
                                             </td>
                                         )}
 
                                         {!selectedCustomer && (
-                                            <td className="px-5 py-3 text-center">
+                                            <td className="px-4 py-2.5 text-center hidden md:table-cell">
                                                 <span className="inline-flex items-center justify-center bg-slate-100 text-slate-600 rounded-md px-2 py-1 text-xs font-bold border border-slate-200">
                                                     {customer.cocherasCount} <Car className="h-3 w-3 ml-1" />
                                                 </span>
                                             </td>
                                         )}
 
-                                        <td className="px-5 py-3 text-right">
+                                        <td className="px-3 md:px-4 py-2.5 text-right whitespace-nowrap">
                                             {customer.totalDebt > 0 ? (
-                                                <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-200">
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">
                                                     ${customer.totalDebt.toLocaleString()}
                                                 </span>
                                             ) : customer.cocherasCount === 0 ? (
-                                                <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
                                                     Inactivo
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100">
                                                     Al Día
                                                 </span>
                                             )}
@@ -553,7 +585,7 @@ export default function CustomersPage() {
                                 ))}
                                 {customersWithStats.length === 0 && (
                                     <tr>
-                                        <td colSpan={selectedCustomer ? 2 : 4} className="px-5 py-8 text-center text-slate-400">
+                                        <td colSpan={selectedCustomer ? 2 : 4} className="px-4 py-8 text-center text-slate-400">
                                             No se encontraron clientes.
                                         </td>
                                     </tr>
@@ -565,17 +597,17 @@ export default function CustomersPage() {
 
                 {/* DETAIL VIEW PANEL */}
                 {selectedCustomer && (
-                    <div className="w-full lg:w-2/3 bg-white rounded-2xl border border-slate-200 shadow-xl flex flex-col animate-in slide-in-from-right-4 overflow-hidden">
+                    <div className="flex-1 min-w-0 h-full bg-white rounded-2xl border border-slate-200 shadow-xl flex flex-col animate-in slide-in-from-right-4 overflow-hidden">
 
                         {/* Header */}
-                        <div className="px-6 py-4 bg-slate-900 flex items-center justify-between shadow-md z-20">
-                            <div className="flex items-center gap-4">
-                                <div className="h-12 w-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xl font-bold border-2 border-slate-700 shadow-inner">
+                        <div className="px-5 py-3 shrink-0 bg-slate-900 flex items-center justify-between shadow-md z-20">
+                            <div className="flex items-center gap-3 min-w-0">
+                                <div className="h-10 w-10 shrink-0 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg font-bold border-2 border-slate-700 shadow-inner">
                                     {selectedCustomer.name?.charAt(0).toUpperCase()}
                                 </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-white leading-tight">{selectedCustomer.name}</h2>
-                                    <div className="flex items-center gap-3 mt-1">
+                                <div className="min-w-0">
+                                    <h2 className="text-lg font-bold text-white leading-tight truncate" title={selectedCustomer.name}>{selectedCustomer.name}</h2>
+                                    <div className="flex items-center gap-2 mt-0.5">
                                         <span className="text-slate-400 text-xs font-mono bg-slate-800 px-2 py-0.5 rounded border border-slate-700">ID: {selectedCustomer.id.substring(0, 8)}</span>
                                         {selectedTotalDebt > 0 ? (
                                             <span className="text-red-400 text-xs font-bold flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Deuda Activa</span>
@@ -602,7 +634,7 @@ export default function CustomersPage() {
                         )}
 
                         {/* Tabs Component - Clean Style */}
-                        <div className="flex px-6 border-b border-slate-200 bg-slate-50 items-end overflow-x-auto hide-scrollbar">
+                        <div className="flex px-4 shrink-0 border-b border-slate-200 bg-slate-50 items-end overflow-x-auto hide-scrollbar">
                             {[
                                 { id: 'profile', label: 'Perfil', icon: User },
                                 { id: 'assets', label: 'Cocheras & Vehículos', icon: Building2 },
@@ -616,13 +648,13 @@ export default function CustomersPage() {
                                         key={tab.id}
                                         onClick={() => setActiveTab(tab.id as TabType)}
                                         className={cn(
-                                            "flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap",
+                                            "flex items-center gap-2 px-4 py-2.5 text-[13px] font-bold border-b-2 transition-all whitespace-nowrap",
                                             isActive
                                                 ? "border-indigo-600 text-indigo-700 bg-white shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05),_0_2px_4px_-1px_rgba(0,0,0,0.06)] rounded-t-lg"
                                                 : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
                                         )}
                                     >
-                                        <Icon className={cn("h-4 w-4", isActive ? "text-indigo-600" : "text-slate-400")} />
+                                        <Icon className={cn("h-3.5 w-3.5", isActive ? "text-indigo-600" : "text-slate-400")} />
                                         {tab.label}
                                     </button>
                                 )
@@ -630,91 +662,105 @@ export default function CustomersPage() {
                         </div>
 
                         {/* Tab Content Area */}
-                        <div className="flex-1 overflow-y-auto bg-slate-50/30 p-6">
+                        <div ref={detailScrollRef} className={cn(
+                            "flex-1 min-h-0 overscroll-contain bg-slate-50/30 flex flex-col",
+                            activeTab === 'profile' ? "overflow-y-auto overflow-x-hidden p-4 lg:p-5 [@media(max-height:800px)]:p-3.5" : "overflow-y-auto overflow-x-hidden p-4 lg:p-5"
+                        )}>
 
                             {/* TAB: PROFILE */}
                             {activeTab === 'profile' && (
-                                <form onSubmit={handleUpdateProfile} className="max-w-2xl mx-auto space-y-6 animate-in fade-in">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                                        <div className="space-y-4 md:col-span-2">
-                                            <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2">
+                                <form onSubmit={handleUpdateProfile} className="w-full h-auto min-h-full max-w-4xl mx-auto flex flex-col gap-4 [@media(max-height:800px)]:gap-3 animate-in fade-in">
+                                    <div className="flex-none flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm p-5 [@media(max-height:800px)]:p-4 mb-4 md:mb-0">
+                                        
+                                        {/* BLOQUE 1 - Información Personal */}
+                                        <div className="shrink-0">
+                                            <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2 mb-3 [@media(max-height:800px)]:mb-2.5">
                                                 <User className="h-4 w-4 text-slate-400" /> Información Personal
                                             </h3>
                                         </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-3.5 [@media(max-height:800px)]:gap-y-3 shrink-0">
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5">Nombre Completo</label>
+                                                <input
+                                                    type="text" required value={editForm.name || ''}
+                                                    onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5">DNI</label>
+                                                <input
+                                                    type="text" value={editForm.dni || ''}
+                                                    onChange={e => setEditForm({ ...editForm, dni: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3" /> Teléfono</label>
+                                                <input
+                                                    type="text" value={editForm.phone || ''}
+                                                    onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5 flex items-center gap-1"><Mail className="h-3 w-3" /> Correo Electrónico</label>
+                                                <input
+                                                    type="email" value={editForm.email || ''}
+                                                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3" /> Teléfono Laboral</label>
+                                                <input
+                                                    type="text" value={editForm.work_phone || ''}
+                                                    onChange={e => setEditForm({ ...editForm, work_phone: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3 text-red-500" /> Teléfono de Emergencia</label>
+                                                <input
+                                                    type="text" value={editForm.emergency_phone || ''}
+                                                    onChange={e => setEditForm({ ...editForm, emergency_phone: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                        </div>
 
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Nombre Completo</label>
-                                            <input
-                                                type="text" required value={editForm.name || ''}
-                                                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">DNI</label>
-                                            <input
-                                                type="text" value={editForm.dni || ''}
-                                                onChange={e => setEditForm({ ...editForm, dni: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3" /> Teléfono</label>
-                                            <input
-                                                type="text" value={editForm.phone || ''}
-                                                onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Mail className="h-3 w-3" /> Correo Electrónico</label>
-                                            <input
-                                                type="email" value={editForm.email || ''}
-                                                onChange={e => setEditForm({ ...editForm, email: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3" /> Teléfono Laboral</label>
-                                            <input
-                                                type="text" value={editForm.work_phone || ''}
-                                                onChange={e => setEditForm({ ...editForm, work_phone: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Phone className="h-3 w-3 text-red-500" /> Teléfono de Emergencia</label>
-                                            <input
-                                                type="text" value={editForm.emergency_phone || ''}
-                                                onChange={e => setEditForm({ ...editForm, emergency_phone: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
-                                        <div className="md:col-span-2 mt-2">
-                                            <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2 mb-4">
+                                        {/* BLOQUE 2 - Dirección */}
+                                        <div className="shrink-0 mt-5 pt-4 border-t border-slate-100 [@media(max-height:800px)]:mt-4 [@media(max-height:800px)]:pt-3">
+                                            <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2 mb-3 [@media(max-height:800px)]:mb-2.5">
                                                 <MapPin className="h-4 w-4 text-slate-400" /> Dirección
                                             </h3>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Domicilio</label>
-                                            <input
-                                                type="text" value={editForm.address || ''}
-                                                onChange={e => setEditForm({ ...editForm, address: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-3.5 [@media(max-height:800px)]:gap-y-3 shrink-0">
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5">Domicilio</label>
+                                                <input
+                                                    type="text" value={editForm.address || ''}
+                                                    onChange={e => setEditForm({ ...editForm, address: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase leading-tight mb-1.5">Localidad</label>
+                                                <input
+                                                    type="text" value={editForm.localidad || ''}
+                                                    onChange={e => setEditForm({ ...editForm, localidad: e.target.value })}
+                                                    className="w-full px-3 py-2 h-10 [@media(max-height:800px)]:h-9 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                />
+                                            </div>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Localidad</label>
-                                            <input
-                                                type="text" value={editForm.localidad || ''}
-                                                onChange={e => setEditForm({ ...editForm, localidad: e.target.value })}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                            />
-                                        </div>
+
+                                        {/* Flex spacer to distribute available height if the window is tall enough */}
+                                        <div className="flex-1 min-h-0"></div>
                                     </div>
 
-                                    <div className="flex justify-end">
-                                        <button type="submit" disabled={savingProfile} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl flex items-center gap-2 text-sm transition-all shadow-md shadow-indigo-200">
+                                    {/* Fila de Acción */}
+                                    <div className="flex justify-end shrink-0">
+                                        <button type="submit" disabled={savingProfile} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-10 [@media(max-height:800px)]:h-9 px-5 rounded-xl flex items-center gap-2 text-sm transition-all shadow-md shadow-indigo-200">
                                             {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar Cambios
                                         </button>
                                     </div>
@@ -832,197 +878,169 @@ export default function CustomersPage() {
                                     <h3 className="font-bold text-sm text-slate-500 uppercase tracking-wide mb-4">Cocheras Asignadas ({selectedCocheras.length})</h3>
 
                                     {selectedCocheras.length > 0 ? (
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {selectedCocheras.map(cochera => {
                                                 const hasCocheraDebt = cochera.totalCocheraDebt > 0;
-                                                const debtMonthCount = cochera.owedMonths?.length ?? 0;
-                                                const hasMultipleMonths = debtMonthCount > 1;
-                                                const hasSingleMonth = debtMonthCount === 1;
 
                                                 return (
-                                                    <div key={cochera.id} className={cn(
-                                                        "rounded-2xl border p-5 transition-all flex flex-col justify-start min-h-0",
-                                                        (cochera.isVencida || hasCocheraDebt)
-                                                            ? "bg-red-50/20 border-red-200 shadow-sm"
-                                                            : "bg-white border-slate-200 shadow-sm hover:border-indigo-300"
-                                                    )}>
-                                                        {/* Cochera Header */}
-                                                        <div className="flex justify-between items-start w-full">
-                                                            <div className="flex flex-col gap-1.5">
-                                                                <div className="flex items-center gap-2">
-                                                                    <h4 className={cn("font-black text-lg", (cochera.isVencida || hasCocheraDebt) ? "text-red-700" : "text-slate-800")}>
-                                                                        #{cochera.numero || cochera.name || 'S/N'}
-                                                                    </h4>
-                                                                    <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                                                        TIPO: {cochera.tipo || 'STANDARD'}
-                                                                    </span>
-                                                                </div>
-                                                                {hasCocheraDebt && (
-                                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded w-fit">
-                                                                        <AlertCircle className="h-3 w-3" /> DEBE {debtMonthCount || '?'} {hasSingleMonth ? 'MES' : 'MESES'}
-                                                                    </span>
-                                                                )}
+                                                <div key={cochera.id} className={cn(
+                                                    "rounded-2xl border p-5 transition-all",
+                                                    (cochera.isVencida || hasCocheraDebt)
+                                                        ? "bg-red-50/40 border-red-100 shadow-[0_2px_10px_-3px_rgba(239,68,68,0.15)]"
+                                                        : "bg-white border-slate-200 shadow-sm hover:border-indigo-300"
+                                                )}>
+                                                    {/* Cochera Header */}
+                                                    <div className="flex justify-between items-start mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={cn(
+                                                                "p-2.5 rounded-xl",
+                                                                (cochera.isVencida || hasCocheraDebt) ? "bg-red-100 text-red-600" : "bg-indigo-50 text-indigo-600"
+                                                            )}>
+                                                                <Building2 className="h-5 w-5" />
                                                             </div>
-
-                                                            {/* Financial Summary */}
-                                                            <div className="flex flex-col items-end text-right gap-0.5">
-                                                                {!hasCocheraDebt && (
-                                                                    <>
-                                                                        <p className="text-[11px] font-bold uppercase text-slate-400 mb-1">Precio base</p>
-                                                                        <p className="text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                                                                            ${cochera.precio_base?.toLocaleString() || 0}
-                                                                        </p>
-                                                                    </>
-                                                                )}
-
-                                                                {hasCocheraDebt && hasSingleMonth && (
-                                                                    <>
-                                                                        <p className="text-[11px] font-bold uppercase text-red-400 mb-0.5">Deuda actual</p>
-                                                                        <p className="text-lg font-black text-red-600">
-                                                                            ${cochera.totalCocheraDebt.toLocaleString()}
-                                                                        </p>
-                                                                    </>
-                                                                )}
-
-                                                                {hasCocheraDebt && hasMultipleMonths && (
-                                                                    <>
-                                                                        <p className="text-[10px] font-bold uppercase text-slate-400">Precio base mensual</p>
-                                                                        <p className="text-sm font-bold text-slate-600 mb-1.5">
-                                                                            ${cochera.precio_base?.toLocaleString() || 0}
-                                                                        </p>
-                                                                        <p className="text-[11px] font-bold uppercase text-red-500">Total adeudado</p>
-                                                                        <p className="text-lg font-black text-red-600">
-                                                                            ${cochera.totalCocheraDebt.toLocaleString()}
-                                                                        </p>
-                                                                    </>
-                                                                )}
-
-                                                                {hasCocheraDebt && debtMonthCount === 0 && (
-                                                                    <>
-                                                                        <p className="text-[11px] font-bold uppercase text-red-400 mb-0.5">Deuda actual</p>
-                                                                        <p className="text-lg font-black text-red-600">
-                                                                            ${cochera.totalCocheraDebt.toLocaleString()}
-                                                                        </p>
-                                                                    </>
-                                                                )}
+                                                            <div className="flex flex-col">
+                                                                <p className={cn("font-black text-lg flex items-center gap-2 flex-wrap", (cochera.isVencida || hasCocheraDebt) ? "text-red-700" : "text-slate-800")}>
+                                                                    #{cochera.numero || cochera.name || 'S/N'}
+                                                                    {hasCocheraDebt && (
+                                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded">
+                                                                            <AlertCircle className="h-3 w-3" /> DEBE {cochera.owedMonths?.length || '?'} MESES
+                                                                        </span>
+                                                                    )}
+                                                                </p>
+                                                                <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit mt-1">
+                                                                    Tipo: {cochera.tipo || 'Standard'}
+                                                                </span>
                                                             </div>
                                                         </div>
-
-                                                        {/* Meses adeudados detalle */}
-                                                        {hasCocheraDebt && debtMonthCount > 0 && (
-                                                            <div className="mt-4 pt-3 border-t border-red-100 w-full">
-                                                                <p className="text-[10px] font-bold uppercase text-red-400 mb-1.5">{hasSingleMonth ? 'Mes Adeudado' : 'Meses Adeudados'}</p>
-                                                                <p className="text-xs font-semibold text-red-700 tracking-wide">
-                                                                    {cochera.owedMonths!.join(' · ')}
+                                                        {/* Precio base / Deuda */}
+                                                        <div className="text-right flex flex-col items-end gap-1">
+                                                            {hasCocheraDebt ? (
+                                                                <>
+                                                                    <p className="text-slate-400 text-xs line-through">
+                                                                        ${cochera.precio_base?.toLocaleString() || 0}/mes
+                                                                    </p>
+                                                                    <p className="font-black text-sm text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
+                                                                        ${cochera.totalCocheraDebt.toLocaleString()}
+                                                                    </p>
+                                                                </>
+                                                            ) : (
+                                                                <p className="text-slate-400 font-bold text-sm bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                                                                    ${cochera.precio_base?.toLocaleString() || 0}
                                                                 </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Meses adeudados detalle */}
+                                                    {cochera.owedMonths && cochera.owedMonths.length > 0 && (
+                                                        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-100 rounded-xl">
+                                                            <p className="text-[10px] font-bold uppercase text-red-500 mb-1">Meses Adeudados</p>
+                                                            <p className="text-xs font-semibold text-red-700">
+                                                                {cochera.owedMonths.join(', ')}
+                                                            </p>
+                                                        </div>
+                                                    )}
+
+                                                    {/* CRUCE: VEHÍCULOS AUTORIZADOS */}
+                                                    <div className="mt-4 pt-4 border-t border-slate-100">
+                                                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-2">Vehículos Autorizados</p>
+                                                        {cochera.allVehicles && cochera.allVehicles.length > 0 ? (
+                                                            <div className="space-y-2">
+                                                                {cochera.allVehicles.map((vehicle: Vehicle) => {
+                                                                    let parsedPhotos: any = {};
+                                                                    try {
+                                                                        parsedPhotos = typeof vehicle.photos === 'string' ? JSON.parse(vehicle.photos) : vehicle.photos || {};
+                                                                    } catch (e) { }
+
+                                                                    const seguroUrl = parsedPhotos?.seguro;
+                                                                    const dniUrl = parsedPhotos?.dni;
+                                                                    const cedulaUrl = parsedPhotos?.cedula;
+
+                                                                    // Resolve vehicle type icon & color from vehicle_types table
+                                                                    const matchedType = vehicleTypes.find(vt => vt.name?.toLowerCase() === vehicle.type?.toLowerCase());
+                                                                    const VehicleIcon = getVehicleIcon(matchedType?.icon_key);
+                                                                    const vehicleColorKey = matchedType?.color_key || 'slate';
+                                                                    const vehicleTypeName = vehicle.type ? smartCapitalize(vehicle.type) : null;
+
+                                                                    // Build secondary line: Brand Model (filter nulls)
+                                                                    const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
+
+                                                                    return (
+                                                                        <div key={vehicle.id} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
+                                                                            <div className="flex items-center gap-3 min-w-0">
+                                                                                {/* Icon with system color */}
+                                                                                <div className={cn("p-1.5 rounded-lg border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
+                                                                                    <VehicleIcon className="h-4 w-4" />
+                                                                                </div>
+                                                                                <div className="min-w-0">
+                                                                                    {/* Primary line: Patente + Type */}
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{vehicle.plate}</p>
+                                                                                        {vehicleTypeName && (
+                                                                                            <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
+                                                                                                {vehicleTypeName}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {/* Secondary line: Brand Model */}
+                                                                                    {brandModel && (
+                                                                                        <p className="text-[11px] text-slate-400 mt-0.5 truncate">{brandModel}</p>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    disabled={!seguroUrl}
+                                                                                    onClick={(e) => { e.stopPropagation(); setSelectedImage(seguroUrl); }}
+                                                                                    title="Seguro"
+                                                                                    className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
+                                                                                >
+                                                                                    <ShieldCheck className="h-3.5 w-3.5" />
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    disabled={!dniUrl}
+                                                                                    onClick={(e) => { e.stopPropagation(); setSelectedImage(dniUrl); }}
+                                                                                    title="DNI"
+                                                                                    className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
+                                                                                >
+                                                                                    <Contact2 className="h-3.5 w-3.5" />
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    disabled={!cedulaUrl}
+                                                                                    onClick={(e) => { e.stopPropagation(); setSelectedImage(cedulaUrl); }}
+                                                                                    title="Cédula"
+                                                                                    className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
+                                                                                >
+                                                                                    <FileText className="h-3.5 w-3.5" />
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 bg-amber-50 text-amber-600 border border-amber-200 p-3 rounded-xl text-xs font-bold">
+                                                                <AlertCircle className="h-4 w-4" /> Sin vehículos asignados
                                                             </div>
                                                         )}
 
-                                                        {/* CRUCE: VEHÍCULOS AUTORIZADOS */}
-                                                        <div className="mt-4 pt-4 border-t border-slate-100 w-full">
-                                                            <p className="text-[10px] font-bold uppercase text-slate-400 mb-2">Vehículos Autorizados</p>
-                                                            {cochera.allVehicles && cochera.allVehicles.length > 0 ? (
-                                                                <div className="space-y-2">
-                                                                    {cochera.allVehicles.map((vehicle: Vehicle) => {
-                                                                        let parsedPhotos: any = {};
-                                                                        try {
-                                                                            parsedPhotos = typeof vehicle.photos === 'string' ? JSON.parse(vehicle.photos) : vehicle.photos || {};
-                                                                        } catch (e) { }
-
-                                                                        const seguroUrl = parsedPhotos?.seguro;
-                                                                        const dniUrl = parsedPhotos?.dni;
-                                                                        const cedulaUrl = parsedPhotos?.cedula;
-
-                                                                        // Resolve vehicle type icon & color from vehicle_types table
-                                                                        const matchedType = vehicleTypes.find(vt => vt.name?.toLowerCase() === vehicle.type?.toLowerCase());
-                                                                        const VehicleIcon = getVehicleIcon(matchedType?.icon_key);
-                                                                        const vehicleColorKey = matchedType?.color_key || 'slate';
-                                                                        const vehicleTypeName = vehicle.type ? smartCapitalize(vehicle.type) : null;
-
-                                                                        // Build secondary line: Brand Model (filter nulls)
-                                                                        const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
-
-                                                                        return (
-                                                                            <div key={vehicle.id} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
-                                                                                <div className="flex items-center gap-3 min-w-0">
-                                                                                    {/* Icon with system color */}
-                                                                                    <div className={cn("p-1.5 rounded-lg border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
-                                                                                        <VehicleIcon className="h-4 w-4" />
-                                                                                    </div>
-                                                                                    <div className="min-w-0">
-                                                                                        {/* Primary line: Patente + Type */}
-                                                                                        <div className="flex items-center gap-2">
-                                                                                            <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{vehicle.plate}</p>
-                                                                                            {vehicleTypeName && (
-                                                                                                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
-                                                                                                    {vehicleTypeName}
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                        {/* Secondary line: Brand Model */}
-                                                                                        {brandModel && (
-                                                                                            <p className="text-[11px] text-slate-400 mt-0.5 truncate">{brandModel}</p>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="flex items-center gap-1 shrink-0">
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={!seguroUrl}
-                                                                                        onClick={(e) => { e.stopPropagation(); setSelectedImage(seguroUrl); }}
-                                                                                        title="Seguro"
-                                                                                        className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
-                                                                                    >
-                                                                                        <ShieldCheck className="h-3.5 w-3.5" />
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={!dniUrl}
-                                                                                        onClick={(e) => { e.stopPropagation(); setSelectedImage(dniUrl); }}
-                                                                                        title="DNI"
-                                                                                        className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
-                                                                                    >
-                                                                                        <Contact2 className="h-3.5 w-3.5" />
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={!cedulaUrl}
-                                                                                        onClick={(e) => { e.stopPropagation(); setSelectedImage(cedulaUrl); }}
-                                                                                        title="Cédula"
-                                                                                        className="p-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-20 disabled:hover:bg-slate-100 disabled:hover:text-slate-400"
-                                                                                    >
-                                                                                        <FileText className="h-3.5 w-3.5" />
-                                                                                    </button>
-                                                                                </div>
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="flex items-center gap-2 bg-amber-50 text-amber-600 border border-amber-200 p-3 rounded-xl text-xs font-bold">
-                                                                    <AlertCircle className="h-4 w-4" /> Sin vehículos asignados
-                                                                </div>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Subscription Footer */}
                                                         {cochera.currentEndDate && (
-                                                            <div className="mt-auto pt-5 w-full">
-                                                                <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
-                                                                    <span className="text-[10px] font-bold text-slate-400 uppercase">Vencimiento del abono</span>
-                                                                    <span className={cn(
-                                                                        "text-[11px] font-bold px-2 py-0.5 rounded-full border",
-                                                                        cochera.calendarExpired ? "text-red-600 bg-red-50 border-red-100" : "text-indigo-600 bg-indigo-50 border-indigo-100"
-                                                                    )}>
-                                                                        {(() => {
-                                                                            const [year, month, day] = cochera.currentEndDate!.split('T')[0].split('-');
-                                                                            return `${day}/${month}/${year}`;
-                                                                        })()} {cochera.calendarExpired && "· VENCIDA"}
-                                                                    </span>
-                                                                </div>
+                                                            <div className={cn(
+                                                                "mt-4 pt-3 border-t border-slate-100 text-xs",
+                                                                cochera.isVencida ? "text-red-600 font-bold" : "text-indigo-600 font-medium"
+                                                            )}>
+                                                                Vencimiento Suscripción: {(() => {
+                                                                    const [year, month, day] = cochera.currentEndDate!.split('T')[0].split('-');
+                                                                    return `${day}/${month}/${year}`;
+                                                                })()}
+                                                                {cochera.calendarExpired && " (VENCIDA)"}
                                                             </div>
                                                         )}
                                                     </div>
+                                                </div>
                                                 );
                                             })}
                                         </div>
@@ -1049,23 +1067,23 @@ export default function CustomersPage() {
                                             <table className="w-full text-sm text-left">
                                                 <thead className="bg-white border-b border-slate-100 text-slate-400 uppercase tracking-wider text-[10px] font-bold">
                                                     <tr>
-                                                        <th className="px-6 py-3">Periodo</th>
-                                                        <th className="px-6 py-3">Monto</th>
-                                                        <th className="px-6 py-3">Estado</th>
+                                                        <th className="px-4 py-2 sm:px-6 sm:py-3">Periodo</th>
+                                                        <th className="px-4 py-2 sm:px-6 sm:py-3">Monto</th>
+                                                        <th className="px-4 py-2 sm:px-6 sm:py-3">Estado</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
                                                     {selectedSubs.map(sub => (
                                                         <tr key={sub.id} className="hover:bg-slate-50 transition-colors">
-                                                            <td className="px-6 py-3">
-                                                                <div className="font-medium text-slate-800">{new Date(sub.start_date).toLocaleDateString()} al {sub.end_date ? new Date(sub.end_date).toLocaleDateString() : 'N/A'}</div>
+                                                            <td className="px-4 py-2 sm:px-6 sm:py-3">
+                                                                <div className="font-medium text-slate-800 text-xs sm:text-sm">{new Date(sub.start_date).toLocaleDateString()} al {sub.end_date ? new Date(sub.end_date).toLocaleDateString() : 'N/A'}</div>
                                                             </td>
-                                                            <td className="px-6 py-3 font-bold text-slate-600">
+                                                            <td className="px-4 py-2 sm:px-6 sm:py-3 font-bold text-slate-600 text-xs sm:text-sm">
                                                                 ${Number(sub.price).toLocaleString()}
                                                             </td>
-                                                            <td className="px-6 py-3">
+                                                            <td className="px-4 py-2 sm:px-6 sm:py-3">
                                                                 <span className={cn(
-                                                                    "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                                                    "inline-flex items-center px-1.5 py-0.5 sm:px-2 sm:py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase",
                                                                     sub.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
                                                                         "bg-slate-100 text-slate-500 border border-slate-200"
                                                                 )}>
@@ -1083,6 +1101,96 @@ export default function CustomersPage() {
                                             </div>
                                         )}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* TAB: DOCUMENTATION */}
+                            {activeTab === 'documentation' && (
+                                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+                                    <h3 className="font-bold text-sm text-slate-500 uppercase tracking-wide mb-4">Documentación Digitalizada</h3>
+                                    {(() => {
+                                        const customerSubs = selectedSubs.filter(s => s.documents_metadata);
+                                        const usedSubIds = new Set<string>();
+
+                                        const cocherasWithDocs = selectedCocheras.map(cochera => {
+                                            // Find the most recent subscription with documents (selectedSubs is pre-sorted descending)
+                                            const matchedSub = customerSubs.find(s => !usedSubIds.has(s.id));
+                                            if (matchedSub) usedSubIds.add(matchedSub.id);
+
+                                            let documents: any[] = [];
+                                            if (matchedSub?.documents_metadata) {
+                                                try {
+                                                    const raw = typeof matchedSub.documents_metadata === 'string'
+                                                        ? JSON.parse(matchedSub.documents_metadata)
+                                                        : matchedSub.documents_metadata;
+                                                    if (Array.isArray(raw?.documents)) documents = raw.documents;
+                                                    else if (Array.isArray(raw)) documents = raw;
+                                                } catch { /* malformed JSON — skip gracefully */ }
+                                            }
+
+                                            return { cochera, documents };
+                                        });
+
+                                        if (cocherasWithDocs.length === 0) {
+                                            return (
+                                                <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-12 text-center flex flex-col items-center">
+                                                    <Camera className="h-10 w-10 text-slate-300 mb-3" />
+                                                    <p className="text-slate-500 font-medium text-lg">Sin cocheras</p>
+                                                    <p className="text-sm text-slate-400 mt-1">Este cliente no tiene cocheras para mostrar documentación.</p>
+                                                </div>
+                                            );
+                                        }
+
+                                        return cocherasWithDocs.map(({ cochera, documents }) => (
+                                            <div key={cochera.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                                                <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+                                                    <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                                                        <Building2 className="h-4 w-4" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800">Cochera {cochera.numero || cochera.name || 'S/N'}</h4>
+                                                        <p className="text-xs text-slate-400">Tipo: {cochera.tipo || 'Standard'}</p>
+                                                    </div>
+                                                </div>
+
+                                                {documents.length > 0 ? (
+                                                    <div className="p-5">
+                                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                                            {documents.map((doc: any, idx: number) => {
+                                                                const imgSrc = doc.url || doc.image || doc.data || (typeof doc === 'string' ? doc : null);
+                                                                const label = doc.type || doc.label || doc.name || `Documento ${idx + 1}`;
+
+                                                                if (!imgSrc) return null;
+
+                                                                return (
+                                                                    <button
+                                                                        key={idx}
+                                                                        onClick={() => setSelectedImage(imgSrc)}
+                                                                        className="group relative aspect-[4/3] rounded-xl overflow-hidden border-2 border-slate-200 hover:border-indigo-400 hover:shadow-lg transition-all bg-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                                    >
+                                                                        <img
+                                                                            src={imgSrc}
+                                                                            alt={label}
+                                                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                                        />
+                                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                                        <span className="absolute bottom-2 left-2 text-[10px] font-bold text-white uppercase tracking-wider bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            {label}
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="p-8 text-center flex flex-col items-center">
+                                                        <AlertCircle className="h-8 w-8 text-slate-300 mb-2" />
+                                                        <p className="text-slate-500 font-medium text-sm">Sin documentación cargada para esta cochera</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ));
+                                    })()}
                                 </div>
                             )}
 
