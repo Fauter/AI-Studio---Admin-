@@ -664,9 +664,9 @@ export default function DashboardHome() {
                     {/* Movements Filter Toolbar */}
                     {activeTab === 'movements' && (
                         <div className="bg-slate-50/50 p-3 border-b border-slate-200 shrink-0 print:hidden">
-                            <div className="flex items-end gap-2">
+                            <div className="flex flex-col lg:flex-row items-stretch lg:items-end gap-3 lg:gap-2">
                                 {/* ── Scrollable filter inputs ── */}
-                                <div className="flex flex-nowrap items-end gap-2 overflow-x-auto pb-1 scrollbar-hide min-w-0 flex-1">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-wrap items-end gap-2 pb-1 min-w-0 flex-1">
                                     <div className="flex-1 min-w-[75px]">
                                         <label className="block text-[10px] text-slate-500 font-medium mb-1 truncate">Desde <span className="text-slate-400">(DD/MM)</span></label>
                                         <input type="text" inputMode="numeric" value={movFilters.dateFrom} onChange={e => updateMovFilter('dateFrom', applyDateMask(e.target.value))} placeholder="DD/MM" maxLength={5} className={cn("w-full h-9 text-xs bg-white border rounded-md px-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500", movFilters.dateFrom && !parseSmartDate(movFilters.dateFrom) && movFilters.dateFrom.length === 5 ? "border-amber-400 bg-amber-50/50" : "border-slate-200")} />
@@ -768,7 +768,7 @@ export default function DashboardHome() {
                         {activeTab === 'movements' ? (
                             <>
                                 <table className="w-full text-sm text-left">
-                                    <thead className="sticky top-0 z-20">
+                                    <thead className="sticky top-0 z-20 hidden md:table-header-group">
                                         {/* Column names */}
                                         <tr className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                                             <th className="px-2 py-2 font-semibold w-[90px]">Hora</th>
@@ -802,8 +802,45 @@ export default function DashboardHome() {
                                             </tr>
                                         ) : (
                                             paginatedMovements.map(move => (
-                                                <tr key={move.id} className="hover:bg-indigo-50/30 transition-colors">
-                                                    <td className="px-2 py-2 text-xs text-slate-500 whitespace-nowrap">
+                                                <React.Fragment key={move.id}>
+
+<tr className="md:hidden block border-b border-slate-100 p-3 hover:bg-indigo-50/30 transition-colors">
+    <td className="block w-full">
+        <div className="flex justify-between items-start mb-2">
+            <div className="flex flex-col">
+                <span className="font-bold text-slate-800 font-mono text-[14px]">{move.plate || '---'}</span>
+                <span className="text-[10px] uppercase text-indigo-600 font-medium">{move.plate ? (vehicleMap[move.plate] || 'Vehículo') : move.type}</span>
+            </div>
+            <div className="text-right">
+                <div className="font-bold text-slate-900 font-mono text-sm">{formatCurrency(move.amount)}</div>
+                <div className="text-xs text-slate-500">
+                    <span className="font-semibold text-slate-700">{formatTime24(move.timestamp)}</span>
+                    <span className="ml-1 text-[9px] text-slate-400">{formatDateDM(move.timestamp)}</span>
+                </div>
+            </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-600">{(move.operator || move.operator_name || 'Sistema')}</span>
+            <span className={cn(
+                "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border",
+                (move.payment_method || '').toUpperCase() === 'EFECTIVO'
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-indigo-50 text-indigo-700 border-indigo-200"
+            )}>{move.payment_method || '---'}</span>
+            {move.invoice_type && (
+                <span className={cn(
+                    "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+                    move.invoice_type === 'CC' ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"
+                )}>{move.invoice_type}</span>
+            )}
+        </div>
+        <div className="text-xs text-slate-600 whitespace-normal break-words min-w-0">
+            {formatNotesCurrency(move.notes)}
+        </div>
+    </td>
+</tr>
+<tr className="hidden md:table-row hover:bg-indigo-50/30 transition-colors">
+    <td className="px-2 py-2 text-xs text-slate-500 whitespace-nowrap">
                                                         <span className="font-semibold text-slate-700">{formatTime24(move.timestamp)}</span>
                                                         <span className="block text-[9px] text-slate-400">{formatDateDM(move.timestamp)}</span>
                                                     </td>
@@ -857,6 +894,7 @@ export default function DashboardHome() {
                                                             : '---'}
                                                     </td>
                                                 </tr>
+</React.Fragment>
                                             ))
                                         )}
                                     </tbody>
@@ -882,8 +920,30 @@ export default function DashboardHome() {
                                 )}
                             </>
                         ) : (
-                            <table className="w-full text-sm text-left">
-                                <thead className="sticky top-0 z-20">
+                            <div className="flex flex-col h-full">
+                                <div className="md:hidden p-3 border-b border-slate-100 bg-slate-50 space-y-2 shrink-0">
+                                    <div className="relative">
+                                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                                        <input type="text" value={stayFilters.plate} onChange={e => updateStayFilter('plate', e.target.value)} placeholder="Buscar patente…" className="w-full text-xs bg-white border border-slate-200 rounded-md pl-7 pr-2 py-1.5 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1">
+                                            <FilterSelect value={stayFilters.vehicleType} onChange={v => updateStayFilter('vehicleType', v)} options={vehicleTypeOptions} placeholder="Vehículo" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <FilterSelect value={stayFilters.timeRange} onChange={v => updateStayFilter('timeRange', v)} options={['<1h', '1h-4h', '4h-12h', '>12h']} placeholder="Tiempo" />
+                                        </div>
+                                    </div>
+                                    {stayFiltersActive && (
+                                        <button onClick={resetStayFilters} className="w-full mt-2 flex items-center justify-center gap-1.5 h-8 text-[11px] font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors">
+                                            <FilterX className="h-3.5 w-3.5" />
+                                            Limpiar filtros
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex-1 overflow-auto scrollbar-thin">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="sticky top-0 z-20 hidden md:table-header-group">
                                     {/* Column names */}
                                     <tr className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                                         <th className="px-4 py-2 font-semibold">Patente</th>
@@ -892,7 +952,7 @@ export default function DashboardHome() {
                                         <th className="px-4 py-2 font-semibold text-right">Tiempo</th>
                                     </tr>
                                     {/* Filter row */}
-                                    <tr className="bg-white border-b border-slate-100">
+                                    <tr className="bg-white border-b border-slate-100 hidden md:table-row">
                                         <td className="px-4 py-1.5">
                                             <div className="relative">
                                                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
@@ -961,8 +1021,27 @@ export default function DashboardHome() {
                                         </tr>
                                     ) : (
                                         filteredStays.map(stay => (
-                                            <tr key={stay.id} className="hover:bg-blue-50/30 transition-colors">
-                                                <td className="px-4 py-2">
+                                            <React.Fragment key={stay.id}>
+
+<tr className="md:hidden block border-b border-slate-100 p-3 hover:bg-blue-50/30 transition-colors">
+    <td className="block w-full">
+        <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 font-mono text-[14px] px-2 py-0.5 bg-white rounded border border-slate-300 uppercase">{stay.plate}</span>
+                <span className="text-[10px] font-bold text-slate-600 uppercase bg-slate-100 px-1.5 py-0.5 rounded">{stay.vehicle_type || 'Vehículo'}</span>
+            </div>
+            <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 font-bold text-[11px] rounded border border-blue-100">
+                <Clock className="h-3 w-3" />
+                {getTimeElapsed(stay.entry_time)}
+            </div>
+        </div>
+        <div className="text-xs text-slate-600 font-medium">
+            Ingreso: {formatTime24(stay.entry_time)} <span className="ml-1 text-[10px] text-slate-400">{formatDateDM(stay.entry_time)}</span>
+        </div>
+    </td>
+</tr>
+<tr className="hidden md:table-row hover:bg-blue-50/30 transition-colors">
+    <td className="px-4 py-2">
                                                     <span className="font-bold text-slate-800 font-mono text-[13px] px-2 py-0.5 bg-white rounded border border-slate-300 uppercase">
                                                         {stay.plate}
                                                     </span>
@@ -983,10 +1062,12 @@ export default function DashboardHome() {
                                                     </div>
                                                 </td>
                                             </tr>
+</React.Fragment>
                                         ))
                                     )}
                                 </tbody>
                             </table>
+                        </div></div>
                         )}
                     </div>
                 </div>

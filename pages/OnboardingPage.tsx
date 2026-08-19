@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Building2,
@@ -17,6 +18,7 @@ import {
   Key,
   UserPlus,
   Pencil,
+  Trash2,
   X,
   Briefcase,
   Lock,
@@ -200,8 +202,64 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
     }
   };
 
+  // --- DELETE EMPLOYEE STATE & HANDLERS ---
+  const [deletingEmp, setDeletingEmp] = useState<EmployeeAccount | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = (emp: EmployeeAccount) => {
+    setDeletingEmp(emp);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingEmp || !effectiveOwnerId) return;
+
+    setIsDeleting(true);
+    setStatus(null);
+
+    try {
+      const { error, count } = await supabase
+        .from('employee_accounts')
+        .delete({ count: 'exact' })
+        .eq('id', deletingEmp.id)
+        .eq('owner_id', effectiveOwnerId);
+
+      if (error) throw error;
+      
+      if (count === 0) {
+         throw new Error("Privilegios insuficientes o el empleado no existe.");
+      }
+
+      setStatus({ type: 'success', text: 'Empleado eliminado exitosamente.' });
+      setStaff(prev => prev.filter(s => s.id !== deletingEmp.id));
+      
+      if (selectedEmp?.id === deletingEmp.id) {
+        setSelectedEmp(null);
+      }
+      if (editingEmp?.id === deletingEmp.id) {
+        setEditingEmp(null);
+      }
+      setDeletingEmp(null);
+    } catch (err: any) {
+      console.error(err);
+      setStatus({ type: 'error', text: 'No se pudo eliminar el empleado: ' + err.message });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // --- EDIT EMPLOYEE STATE & HANDLERS ---
   const [editingEmp, setEditingEmp] = useState<EmployeeAccount | null>(null);
+
+  // Lock body scroll when any modal is open
+  useEffect(() => {
+    if (editingEmp || deletingEmp) {
+      const originalStyle = window.getComputedStyle(document.body).overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalStyle;
+      };
+    }
+  }, [editingEmp, deletingEmp]);
   const [editForm, setEditForm] = useState({
     firstName: '',
     lastName: '',
@@ -406,7 +464,10 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
                         </td>
                         <td className="flex justify-between items-center md:table-cell px-0 py-2 md:px-6 md:py-4 text-right">
                           <span className="md:hidden font-semibold text-xs text-slate-500 uppercase">Acciones</span>
-                          <button onClick={() => handleEditClick(s)} className="text-slate-400 hover:text-indigo-600 p-2 transition-colors" title="Editar empleado"><Pencil className="h-4 w-4" /></button>
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button type="button" onClick={() => handleEditClick(s)} className="text-slate-400 hover:text-indigo-600 p-2 transition-colors" title="Editar empleado" aria-label={`Editar a ${s.first_name} ${s.last_name}`}><Pencil className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => handleDeleteClick(s)} className="text-slate-400 hover:text-red-600 p-2 transition-colors" title="Eliminar empleado" aria-label={`Eliminar a ${s.first_name} ${s.last_name}`}><Trash2 className="h-4 w-4" /></button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -521,8 +582,8 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
       )}
 
       {/* Edit Modal */}
-      {editingEmp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+      {editingEmp && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -561,7 +622,45 @@ const GlobalAccessSection = ({ garages }: { garages: Garage[] }) => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Delete Modal */}
+      {deletingEmp && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-red-600" />
+                <h3 className="font-bold text-slate-800">Eliminar Empleado</h3>
+              </div>
+              <button disabled={isDeleting} onClick={() => setDeletingEmp(null)} className="text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 md:p-6 space-y-5">
+              <p className="text-slate-700 text-sm">
+                ¿Seguro que querés eliminar a <strong>{deletingEmp.first_name} {deletingEmp.last_name}</strong>?
+              </p>
+              <p className="text-xs text-slate-500 font-mono">
+                @{deletingEmp.username}
+              </p>
+              <p className="text-sm text-red-600 font-medium">
+                Esta acción eliminará su acceso al sistema y no se puede deshacer.
+              </p>
+              <div className="flex gap-3 pt-2">
+                <button type="button" disabled={isDeleting} onClick={() => setDeletingEmp(null)} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-3 rounded-xl text-sm transition-all disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button type="button" disabled={isDeleting} onClick={handleConfirmDelete} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl flex justify-center gap-2 text-sm transition-all shadow-md shadow-red-200 disabled:opacity-50">
+                  {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Eliminar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -52,7 +52,7 @@ interface Cochera {
     tipo: string | null;
     precio_base: number | null;
     isVencida?: boolean;
-    allVehicles?: Vehicle[];
+    resolvedVehicles?: ResolvedCocheraVehicle[];
 }
 
 interface Vehicle {
@@ -62,6 +62,13 @@ interface Vehicle {
     model: string | null;
     type?: string | null;
     photos?: any;
+}
+
+interface ResolvedCocheraVehicle {
+    rawPlate: string;
+    normalizedPlate: string;
+    vehicle: Vehicle | null;
+    isFallback?: boolean;
 }
 
 interface VehicleTypeRecord {
@@ -141,14 +148,14 @@ const smartCapitalize = (text: string): string => {
 
 interface Subscription {
     id: string;
+    garage_id: string;
     customer_id: string;
     vehicle_id: string | null;
     start_date: string;
     end_date: string | null;
     price: number;
     active: boolean;
-    documents_metadata: any;
-}
+    }
 
 type TabType = 'profile' | 'assets' | 'finance' | 'history' | 'documentation';
 
@@ -157,6 +164,7 @@ export default function CustomersPage() {
 
     // --- State ---
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [debts, setDebts] = useState<Debt[]>([]);
     const [cocheras, setCocheras] = useState<Cochera[]>([]);
@@ -183,44 +191,67 @@ export default function CustomersPage() {
     }, [selectedCustomer?.id]);
 
     // --- Fetch Data ---
-    useEffect(() => {
-        if (!garageId) return;
-
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const [
-                    customersRes,
-                    debtsRes,
-                    cocherasRes,
-                    vehiclesRes,
-                    subsRes,
-                    vehicleTypesRes
-                ] = await Promise.all([
-                    supabase.from('customers').select('*').eq('garage_id', garageId),
-                    supabase.from('debts').select('*').eq('garage_id', garageId).eq('status', 'PENDING'),
-                    supabase.from('cocheras').select('*').eq('garage_id', garageId),
-                    supabase.from('vehicles').select('*').eq('garage_id', garageId),
-                    supabase.from('suscriptions').select('id, customer_id, vehicle_id, start_date, end_date, price, active, documents_metadata').eq('garage_id', garageId),
-                    supabase.from('vehicle_types').select('*').eq('garage_id', garageId),
-                ]);
-
-                if (customersRes.error) throw customersRes.error;
-
-                setCustomers(customersRes.data as Customer[] || []);
-                setDebts(debtsRes.data as Debt[] || []);
-                setCocheras(cocherasRes.data as Cochera[] || []);
-                setVehicles(vehiclesRes.data as Vehicle[] || []);
-                setSubscriptions(subsRes.data as Subscription[] || []);
-                setVehicleTypes(vehicleTypesRes.data as VehicleTypeRecord[] || []);
-
-            } catch (err: any) {
-                console.error("Error fetching customers data:", err);
-            } finally {
-                setLoading(false);
+    const fetchPaginated = async <T,>(factory: (from: number, to: number) => any): Promise<T[]> => {
+        const PAGE_SIZE = 1000;
+        let allData: T[] = [];
+        let from = 0;
+        let keepFetching = true;
+        
+        while (keepFetching) {
+            const { data, error } = await factory(from, from + PAGE_SIZE - 1);
+            if (error) throw error;
+            
+            if (data && data.length > 0) {
+                allData = allData.concat(data);
+                if (data.length < PAGE_SIZE) {
+                    keepFetching = false;
+                } else {
+                    from += PAGE_SIZE;
+                }
+            } else {
+                keepFetching = false;
             }
-        };
+        }
+        return allData;
+    };
 
+    const fetchData = async () => {
+        if (!garageId) return;
+        setLoading(true);
+        setLoadError(null);
+        try {
+            const [
+                customersRes,
+                debtsRes,
+                cocherasRes,
+                vehiclesRes,
+                subsRes,
+                vehicleTypesRes
+            ] = await Promise.all([
+                fetchPaginated((from, to) => supabase.from('customers').select('*').eq('garage_id', garageId).order('id').range(from, to)),
+                fetchPaginated((from, to) => supabase.from('debts').select('*').eq('garage_id', garageId).eq('status', 'PENDING').order('id').range(from, to)),
+                fetchPaginated((from, to) => supabase.from('cocheras').select('*').eq('garage_id', garageId).order('id').range(from, to)),
+                fetchPaginated((from, to) => supabase.from('vehicles').select('*').eq('garage_id', garageId).order('id').range(from, to)),
+                fetchPaginated((from, to) => supabase.from('subscriptions').select('id, garage_id, customer_id, vehicle_id, start_date, end_date, price, active').eq('garage_id', garageId).order('id').range(from, to)),
+                supabase.from('vehicle_types').select('*').eq('garage_id', garageId),
+            ]);
+
+            setCustomers(customersRes as Customer[] || []);
+            setDebts(debtsRes as Debt[] || []);
+            setCocheras(cocherasRes as Cochera[] || []);
+            setVehicles(vehiclesRes as Vehicle[] || []);
+            setSubscriptions(subsRes as Subscription[] || []);
+            setVehicleTypes(vehicleTypesRes.data as VehicleTypeRecord[] || []);
+
+        } catch (err: any) {
+            console.error("Error fetching customers data:", err);
+            setLoadError(err.message || 'Error al cargar los datos.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchData();
     }, [garageId]);
 
@@ -366,8 +397,40 @@ export default function CustomersPage() {
 
         const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
+        const vehicleById = new Map<string, Vehicle>();
+        const vehicleByNormalizedPlate = new Map<string, Vehicle>();
+        for (const v of vehicles) {
+            vehicleById.set(v.id, v);
+            const norm = normalizeIdentifier(v.plate);
+            if (norm) vehicleByNormalizedPlate.set(norm, v);
+        }
+
         return customerCocheras.map(cochera => {
-            const allVehicles = vehicles.filter(v => cochera.vehiculos?.includes(v.plate));
+            const resolvedVehicles: ResolvedCocheraVehicle[] = [];
+            
+            if (Array.isArray(cochera.vehiculos) && cochera.vehiculos.length > 0) {
+                for (const raw of cochera.vehiculos) {
+                    if (!raw) continue;
+                    const norm = normalizeIdentifier(raw);
+                    resolvedVehicles.push({
+                        rawPlate: raw,
+                        normalizedPlate: norm,
+                        vehicle: norm ? (vehicleByNormalizedPlate.get(norm) || null) : null,
+                        isFallback: false
+                    });
+                }
+            } else if (cochera.vehiculo_id) {
+                const v = vehicleById.get(cochera.vehiculo_id);
+                if (v) {
+                    const norm = normalizeIdentifier(v.plate);
+                    resolvedVehicles.push({
+                        rawPlate: v.plate,
+                        normalizedPlate: norm || v.plate,
+                        vehicle: v,
+                        isFallback: true
+                    });
+                }
+            }
 
             let hasCanonDebt = false;
             let currentEndDate: string | null = null;
@@ -375,46 +438,52 @@ export default function CustomersPage() {
             const owedMonths: string[] = [];
             const cocheraDebtIds: string[] = [];
 
-            // Iterate ALL vehicles and ALL subs (not just active — inactive subs can still have pending debts)
-            for (const vehicle of allVehicles) {
-                const subsForVehicle = customerSubs.filter(s => s.vehicle_id === vehicle.id);
-                for (const sub of subsForVehicle) {
-                    // Track end_date from the most recent sub (any state) for calendar check
-                    if (sub.end_date) {
-                        if (!currentEndDate || new Date(sub.end_date).getTime() > new Date(currentEndDate).getTime()) {
-                            currentEndDate = sub.end_date;
-                        }
+            const subsForCochera = customerSubs.filter(sub => {
+                if (!sub.vehicle_id) return false;
+                return resolvedVehicles.some(rv => rv.vehicle?.id === sub.vehicle_id);
+            });
+
+            const allCocheraDebts = [];
+            for (const sub of subsForCochera) {
+                if (sub.end_date) {
+                    if (!currentEndDate || new Date(sub.end_date).getTime() > new Date(currentEndDate).getTime()) {
+                        currentEndDate = sub.end_date;
                     }
+                }
 
-                    // Find CANON debts tied to this subscription
-                    const subDebts = selectedDebts.filter(d =>
-                        d.subscription_id === sub.id &&
-                        d.status === 'PENDING' &&
-                        d.type === 'CANON' &&
-                        getRemaining(d) > 0
-                    );
+                const subDebts = selectedDebts.filter(d =>
+                    d.subscription_id === sub.id &&
+                    d.status === 'PENDING' &&
+                    d.type === 'CANON' &&
+                    getRemaining(d) > 0
+                );
+                allCocheraDebts.push(...subDebts);
+            }
 
-                    if (subDebts.length > 0) {
-                        hasCanonDebt = true;
-                        for (const debt of subDebts) {
-                            totalCocheraDebt += getRemaining(debt);
-                            cocheraDebtIds.push(debt.id);
-                            if (debt.due_date) {
-                                const [y, m] = debt.due_date.split('T')[0].split('-');
-                                owedMonths.push(`${monthNames[parseInt(m, 10) - 1]} ${y}`);
-                            }
-                        }
+            allCocheraDebts.sort((a, b) => {
+                const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+                const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+                return dateA - dateB;
+            });
+
+            if (allCocheraDebts.length > 0) {
+                hasCanonDebt = true;
+                for (const debt of allCocheraDebts) {
+                    totalCocheraDebt += getRemaining(debt);
+                    cocheraDebtIds.push(debt.id);
+                    if (debt.due_date) {
+                        const [y, m] = debt.due_date.split('T')[0].split('-');
+                        owedMonths.push(`${monthNames[parseInt(m, 10) - 1]} ${y}`);
                     }
                 }
             }
 
-            // Doble Candado: Calendar expired OR has pending CANON debts
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const calendarExpired = currentEndDate ? new Date(currentEndDate).getTime() < today.getTime() : false;
             const isVencida = calendarExpired || hasCanonDebt;
 
-            return { ...cochera, allVehicles, isVencida, currentEndDate, totalCocheraDebt, owedMonths, cocheraDebtIds, calendarExpired };
+            return { ...cochera, resolvedVehicles, isVencida, currentEndDate, totalCocheraDebt, owedMonths, cocheraDebtIds, calendarExpired };
         });
     }, [selectedCustomer, cocheras, vehicles, subscriptions, selectedDebts]);
 
@@ -487,11 +556,31 @@ export default function CustomersPage() {
         );
     }
 
+    if (loadError) {
+        return (
+            <div className="flex flex-col h-full items-center justify-center animate-in fade-in zoom-in-95">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl flex flex-col items-center max-w-md text-center">
+                    <div className="h-16 w-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mb-4">
+                        <AlertCircle className="h-8 w-8" />
+                    </div>
+                    <h2 className="text-xl font-black text-slate-800 mb-2">No se pudieron cargar los abonados</h2>
+                    <p className="text-sm text-slate-500 mb-6">{loadError}</p>
+                    <button
+                        onClick={fetchData}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-11 px-6 rounded-xl flex items-center gap-2 transition-all shadow-md shadow-indigo-200"
+                    >
+                        Reintentar
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="flex flex-col gap-6 h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+        <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
             <SectionHeader title="Gestión de Abonados" icon={Users} iconColor="indigo" />
 
-            <div className="flex gap-6 flex-1 min-h-0 min-w-0 overflow-hidden">
+            <div className="flex gap-3 flex-1 min-h-0 min-w-0 overflow-hidden">
 
                 {/* MAIN LIST VIEW */}
                 <div className={cn(
@@ -514,7 +603,7 @@ export default function CustomersPage() {
                     </div>
 
                     {/* Table / List */}
-                    <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain">
+                    <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden ">
                         <table className="w-full text-sm text-left table-fixed">
                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold sticky top-0 z-10 shadow-sm">
                                 <tr>
@@ -543,10 +632,10 @@ export default function CustomersPage() {
                                                     {customer.name?.charAt(0).toUpperCase() || 'C'}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className={cn("font-bold truncate", selectedCustomer?.id === customer.id ? "text-indigo-900" : "text-slate-800")} title={customer.name || ''}>
+                                                    <p className={cn("font-bold break-words whitespace-normal leading-tight", selectedCustomer?.id === customer.id ? "text-indigo-900" : "text-slate-800")} title={customer.name || ''}>
                                                         {customer.name}
                                                     </p>
-                                                    <p className="text-[11px] text-slate-400 font-mono mt-0.5 truncate" title={customer.dni || ''}>DNI {customer.dni || 'S/N'}</p>
+                                                    <p className="text-[11px] text-slate-400 font-mono mt-0.5 whitespace-normal break-words" title={customer.dni || ''}>DNI {customer.dni || 'S/N'}</p>
                                                 </div>
                                             </div>
                                         </td>
@@ -663,7 +752,7 @@ export default function CustomersPage() {
 
                         {/* Tab Content Area */}
                         <div ref={detailScrollRef} className={cn(
-                            "flex-1 min-h-0 overscroll-contain bg-slate-50/30 flex flex-col",
+                            "flex-1 min-h-0  bg-slate-50/30 flex flex-col",
                             activeTab === 'profile' ? "overflow-y-auto overflow-x-hidden p-4 lg:p-5 [@media(max-height:800px)]:p-3.5" : "overflow-y-auto overflow-x-hidden p-4 lg:p-5"
                         )}>
 
@@ -759,7 +848,7 @@ export default function CustomersPage() {
                                     </div>
 
                                     {/* Fila de Acción */}
-                                    <div className="flex justify-end shrink-0">
+                                    <div className="flex justify-end shrink-0 sticky -bottom-4 lg:-bottom-5 bg-slate-50/95 backdrop-blur-sm py-3 border-t border-slate-200 mt-4 -mx-4 px-4 lg:-mx-5 lg:px-5 z-10">
                                         <button type="submit" disabled={savingProfile} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-10 [@media(max-height:800px)]:h-9 px-5 rounded-xl flex items-center gap-2 text-sm transition-all shadow-md shadow-indigo-200">
                                             {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar Cambios
                                         </button>
@@ -769,7 +858,7 @@ export default function CustomersPage() {
 
                             {/* TAB: FINANCE */}
                             {activeTab === 'finance' && (
-                                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+                                <div className="max-w-4xl w-full mx-auto space-y-5 animate-in fade-in">
 
                                     {/* Summary Card */}
                                     <div className={cn(
@@ -810,7 +899,7 @@ export default function CustomersPage() {
                                                         const relatedSub = selectedSubs.find(s => s.id === debt.subscription_id);
                                                         if (relatedSub) {
                                                             const relatedCochera = selectedCocheras.find(c =>
-                                                                c.allVehicles?.some((v: any) => v.id === relatedSub.vehicle_id)
+                                                                c.resolvedVehicles?.some((rv: any) => rv.vehicle?.id === relatedSub.vehicle_id)
                                                             );
                                                             if (relatedCochera) {
                                                                 const dateStr = debt.due_date ? (() => {
@@ -874,79 +963,129 @@ export default function CustomersPage() {
 
                             {/* TAB: ASSETS */}
                             {activeTab === 'assets' && (
-                                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+                                <div className="max-w-4xl w-full mx-auto space-y-5 animate-in fade-in">
                                     <h3 className="font-bold text-sm text-slate-500 uppercase tracking-wide mb-4">Cocheras Asignadas ({selectedCocheras.length})</h3>
 
                                     {selectedCocheras.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 xl:grid-cols-2 items-start gap-4">
                                             {selectedCocheras.map(cochera => {
-                                                const hasCocheraDebt = cochera.totalCocheraDebt > 0;
+                                                const debtMonthCount = cochera.owedMonths?.length ?? 0;
+                                                const hasDebt = cochera.totalCocheraDebt > 0;
+                                                const hasMultipleMonths = debtMonthCount > 1;
+                                                const hasSingleMonth = debtMonthCount === 1;
+                                                const showDebtOnly = hasDebt && debtMonthCount <= 1;
+                                                const showBoth = hasDebt && hasMultipleMonths;
 
                                                 return (
                                                 <div key={cochera.id} className={cn(
-                                                    "rounded-2xl border p-5 transition-all",
-                                                    (cochera.isVencida || hasCocheraDebt)
-                                                        ? "bg-red-50/40 border-red-100 shadow-[0_2px_10px_-3px_rgba(239,68,68,0.15)]"
+                                                    "rounded-2xl border transition-all flex flex-col",
+                                                    hasDebt || cochera.isVencida
+                                                        ? "bg-red-50/20 border-red-200 shadow-[0_2px_10px_-3px_rgba(239,68,68,0.1)]"
                                                         : "bg-white border-slate-200 shadow-sm hover:border-indigo-300"
                                                 )}>
-                                                    {/* Cochera Header */}
-                                                    <div className="flex justify-between items-start mb-3">
-                                                        <div className="flex items-center gap-3">
+                                                    {/* 1. HEADER: Identity + Financial Summary */}
+                                                    <div className="w-full p-4 pb-3 flex justify-between items-start">
+                                                        {/* Left: Identity */}
+                                                        <div className="flex items-start gap-3">
                                                             <div className={cn(
                                                                 "p-2.5 rounded-xl",
-                                                                (cochera.isVencida || hasCocheraDebt) ? "bg-red-100 text-red-600" : "bg-indigo-50 text-indigo-600"
+                                                                (hasDebt || cochera.isVencida) ? "bg-red-50 text-red-600" : "bg-indigo-50 text-indigo-600"
                                                             )}>
                                                                 <Building2 className="h-5 w-5" />
                                                             </div>
                                                             <div className="flex flex-col">
-                                                                <p className={cn("font-black text-lg flex items-center gap-2 flex-wrap", (cochera.isVencida || hasCocheraDebt) ? "text-red-700" : "text-slate-800")}>
+                                                                <p className={cn("font-black text-lg", (hasDebt || cochera.isVencida) ? "text-red-700" : "text-slate-800")}>
                                                                     #{cochera.numero || cochera.name || 'S/N'}
-                                                                    {hasCocheraDebt && (
-                                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded">
-                                                                            <AlertCircle className="h-3 w-3" /> DEBE {cochera.owedMonths?.length || '?'} MESES
-                                                                        </span>
-                                                                    )}
                                                                 </p>
                                                                 <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit mt-1">
                                                                     Tipo: {cochera.tipo || 'Standard'}
                                                                 </span>
                                                             </div>
                                                         </div>
-                                                        {/* Precio base / Deuda */}
+
+                                                        {/* Right: Financial Summary */}
                                                         <div className="text-right flex flex-col items-end gap-1">
-                                                            {hasCocheraDebt ? (
+                                                            {!hasDebt && (
                                                                 <>
-                                                                    <p className="text-slate-400 text-xs line-through">
-                                                                        ${cochera.precio_base?.toLocaleString() || 0}/mes
+                                                                    <p className="text-[10px] font-bold uppercase text-slate-400">Precio base</p>
+                                                                    <p className="text-slate-700 font-bold text-sm bg-slate-50 px-2 py-1 rounded-md border border-slate-200">
+                                                                        ${cochera.precio_base?.toLocaleString() || 0}
                                                                     </p>
+                                                                </>
+                                                            )}
+
+                                                            {showDebtOnly && (
+                                                                <>
+                                                                    <p className="text-[10px] font-bold uppercase text-red-500">Deuda actual</p>
                                                                     <p className="font-black text-sm text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
                                                                         ${cochera.totalCocheraDebt.toLocaleString()}
                                                                     </p>
+                                                                    {hasSingleMonth && (
+                                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded mt-1">
+                                                                            <AlertCircle className="h-3 w-3" /> DEBE 1 MES
+                                                                        </span>
+                                                                    )}
                                                                 </>
-                                                            ) : (
-                                                                <p className="text-slate-400 font-bold text-sm bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                                                                    ${cochera.precio_base?.toLocaleString() || 0}
-                                                                </p>
+                                                            )}
+
+                                                            {showBoth && (
+                                                                <>
+                                                                    <p className="text-[10px] font-bold uppercase text-slate-400">Precio base mensual</p>
+                                                                    <p className="text-slate-600 font-bold text-xs">
+                                                                        ${cochera.precio_base?.toLocaleString() || 0}
+                                                                    </p>
+                                                                    <div className="mt-2 flex flex-col items-end">
+                                                                        <p className="text-[10px] font-bold uppercase text-red-500">Total adeudado</p>
+                                                                        <p className="font-black text-lg text-red-600">
+                                                                            ${cochera.totalCocheraDebt.toLocaleString()}
+                                                                        </p>
+                                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded mt-0.5">
+                                                                            <AlertCircle className="h-3 w-3" /> DEBE {debtMonthCount} MESES
+                                                                        </span>
+                                                                    </div>
+                                                                </>
                                                             )}
                                                         </div>
                                                     </div>
 
-                                                    {/* Meses adeudados detalle */}
-                                                    {cochera.owedMonths && cochera.owedMonths.length > 0 && (
-                                                        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-100 rounded-xl">
-                                                            <p className="text-[10px] font-bold uppercase text-red-500 mb-1">Meses Adeudados</p>
-                                                            <p className="text-xs font-semibold text-red-700">
-                                                                {cochera.owedMonths.join(', ')}
-                                                            </p>
+                                                    {/* 2. MESES ADEUDADOS DETALLE */}
+                                                    {hasMultipleMonths && cochera.owedMonths && (
+                                                        <div className="w-full px-4 pb-3">
+                                                            <div className="px-3 py-2 bg-red-50/50 border border-red-100 rounded-xl">
+                                                                <p className="text-[10px] font-bold uppercase text-red-400 mb-1">Meses adeudados</p>
+                                                                <p className="text-xs font-semibold text-red-600">
+                                                                    {cochera.owedMonths.join(' · ')}
+                                                                </p>
+                                                            </div>
                                                         </div>
                                                     )}
 
-                                                    {/* CRUCE: VEHÍCULOS AUTORIZADOS */}
-                                                    <div className="mt-4 pt-4 border-t border-slate-100">
-                                                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-2">Vehículos Autorizados</p>
-                                                        {cochera.allVehicles && cochera.allVehicles.length > 0 ? (
-                                                            <div className="space-y-2">
-                                                                {cochera.allVehicles.map((vehicle: Vehicle) => {
+                                                    {/* 3. VEHICULOS AUTORIZADOS */}
+                                                    <div className="w-full px-4 pb-4 pt-0 border-t border-slate-100/50 mt-auto">
+                                                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-3 mt-4">Vehículos autorizados</p>
+                                                        {cochera.resolvedVehicles && cochera.resolvedVehicles.length > 0 ? (
+                                                            <div className="space-y-1.5">
+                                                                {cochera.resolvedVehicles.map((rv: ResolvedCocheraVehicle, idx: number) => {
+                                                                    const vehicle = rv.vehicle;
+                                                                    
+                                                                    if (!vehicle) {
+                                                                        return (
+                                                                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
+                                                                                <div className="flex items-center gap-3 min-w-0">
+                                                                                    <div className="p-1.5 rounded-lg border shrink-0 bg-slate-100 text-slate-400 border-slate-200">
+                                                                                        <Car className="h-4 w-4" />
+                                                                                    </div>
+                                                                                    <div className="min-w-0">
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{rv.rawPlate}</p>
+                                                                                        </div>
+                                                                                        <p className="text-[11px] text-slate-400 mt-0.5 truncate">Datos del vehículo no disponibles</p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    }
+
                                                                     let parsedPhotos: any = {};
                                                                     try {
                                                                         parsedPhotos = typeof vehicle.photos === 'string' ? JSON.parse(vehicle.photos) : vehicle.photos || {};
@@ -956,33 +1095,28 @@ export default function CustomersPage() {
                                                                     const dniUrl = parsedPhotos?.dni;
                                                                     const cedulaUrl = parsedPhotos?.cedula;
 
-                                                                    // Resolve vehicle type icon & color from vehicle_types table
                                                                     const matchedType = vehicleTypes.find(vt => vt.name?.toLowerCase() === vehicle.type?.toLowerCase());
                                                                     const VehicleIcon = getVehicleIcon(matchedType?.icon_key);
                                                                     const vehicleColorKey = matchedType?.color_key || 'slate';
                                                                     const vehicleTypeName = vehicle.type ? smartCapitalize(vehicle.type) : null;
 
-                                                                    // Build secondary line: Brand Model (filter nulls)
                                                                     const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
 
                                                                     return (
-                                                                        <div key={vehicle.id} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
+                                                                        <div key={vehicle.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors">
                                                                             <div className="flex items-center gap-3 min-w-0">
-                                                                                {/* Icon with system color */}
                                                                                 <div className={cn("p-1.5 rounded-lg border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
                                                                                     <VehicleIcon className="h-4 w-4" />
                                                                                 </div>
                                                                                 <div className="min-w-0">
-                                                                                    {/* Primary line: Patente + Type */}
                                                                                     <div className="flex items-center gap-2">
-                                                                                        <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{vehicle.plate}</p>
+                                                                                        <p className="font-bold font-mono text-slate-800 text-sm shrink-0">{rv.rawPlate}</p>
                                                                                         {vehicleTypeName && (
                                                                                             <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0", getVehicleColorStyles(vehicleColorKey))}>
                                                                                                 {vehicleTypeName}
                                                                                             </span>
                                                                                         )}
                                                                                     </div>
-                                                                                    {/* Secondary line: Brand Model */}
                                                                                     {brandModel && (
                                                                                         <p className="text-[11px] text-slate-400 mt-0.5 truncate">{brandModel}</p>
                                                                                     )}
@@ -1026,20 +1160,23 @@ export default function CustomersPage() {
                                                                 <AlertCircle className="h-4 w-4" /> Sin vehículos asignados
                                                             </div>
                                                         )}
-
-                                                        {cochera.currentEndDate && (
-                                                            <div className={cn(
-                                                                "mt-4 pt-3 border-t border-slate-100 text-xs",
-                                                                cochera.isVencida ? "text-red-600 font-bold" : "text-indigo-600 font-medium"
+                                                    </div>
+                                                    
+                                                    {/* 4. FOOTER: VENCIMIENTO */}
+                                                    {cochera.currentEndDate && (
+                                                        <div className="w-full px-4 py-2.5 bg-slate-50/50 border-t border-slate-100 text-[11px] font-bold flex justify-between items-center rounded-b-2xl">
+                                                            <span className="text-slate-500 uppercase">Vencimiento del abono</span>
+                                                            <span className={cn(
+                                                                cochera.isVencida ? "text-red-600" : "text-slate-700"
                                                             )}>
-                                                                Vencimiento Suscripción: {(() => {
+                                                                {(() => {
                                                                     const [year, month, day] = cochera.currentEndDate!.split('T')[0].split('-');
                                                                     return `${day}/${month}/${year}`;
                                                                 })()}
-                                                                {cochera.calendarExpired && " (VENCIDA)"}
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                                {cochera.calendarExpired && " · VENCIDA"}
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 );
                                             })}
@@ -1056,7 +1193,7 @@ export default function CustomersPage() {
 
                             {/* TAB: HISTORY */}
                             {activeTab === 'history' && (
-                                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+                                <div className="max-w-4xl w-full mx-auto space-y-5 animate-in fade-in">
                                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                                         <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
                                             <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -1106,30 +1243,30 @@ export default function CustomersPage() {
 
                             {/* TAB: DOCUMENTATION */}
                             {activeTab === 'documentation' && (
-                                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+                                <div className="max-w-4xl w-full mx-auto space-y-5 animate-in fade-in">
                                     <h3 className="font-bold text-sm text-slate-500 uppercase tracking-wide mb-4">Documentación Digitalizada</h3>
                                     {(() => {
-                                        const customerSubs = selectedSubs.filter(s => s.documents_metadata);
-                                        const usedSubIds = new Set<string>();
-
                                         const cocherasWithDocs = selectedCocheras.map(cochera => {
-                                            // Find the most recent subscription with documents (selectedSubs is pre-sorted descending)
-                                            const matchedSub = customerSubs.find(s => !usedSubIds.has(s.id));
-                                            if (matchedSub) usedSubIds.add(matchedSub.id);
-
                                             let documents: any[] = [];
-                                            if (matchedSub?.documents_metadata) {
-                                                try {
-                                                    const raw = typeof matchedSub.documents_metadata === 'string'
-                                                        ? JSON.parse(matchedSub.documents_metadata)
-                                                        : matchedSub.documents_metadata;
-                                                    if (Array.isArray(raw?.documents)) documents = raw.documents;
-                                                    else if (Array.isArray(raw)) documents = raw;
-                                                } catch { /* malformed JSON — skip gracefully */ }
-                                            }
-
+                                            
+                                            cochera.resolvedVehicles?.forEach(rv => {
+                                                if (rv.vehicle?.photos) {
+                                                    try {
+                                                        const raw = typeof rv.vehicle.photos === 'string' ? JSON.parse(rv.vehicle.photos) : rv.vehicle.photos;
+                                                        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                                                            for (const [key, val] of Object.entries(raw)) {
+                                                                if (val && typeof val === 'string') {
+                                                                    documents.push({ url: val, label: `${rv.rawPlate} - ${smartCapitalize(key)}` });
+                                                                }
+                                                            }
+                                                        } else if (Array.isArray(raw)) {
+                                                            documents.push(...raw);
+                                                        }
+                                                    } catch { }
+                                                }
+                                            });
                                             return { cochera, documents };
-                                        });
+                                        }).filter(c => c.documents.length > 0);
 
                                         if (cocherasWithDocs.length === 0) {
                                             return (

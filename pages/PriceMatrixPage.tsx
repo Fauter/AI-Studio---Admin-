@@ -44,6 +44,17 @@ export default function PriceMatrixPage() {
   // --- Matrix UI State ---
   const [selectedList, setSelectedList] = useState<'standard' | 'electronic'>('standard');
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
+  const [mobileVehicleId, setMobileVehicleId] = useState<string>('');
+
+  useEffect(() => {
+    if (vehicles.length > 0) {
+      if (!mobileVehicleId || !vehicles.find(v => v.id === mobileVehicleId)) {
+        setMobileVehicleId(vehicles[0].id);
+      }
+    } else {
+      setMobileVehicleId('');
+    }
+  }, [vehicles, mobileVehicleId]);
 
   // --- Initial Load ---
   useEffect(() => {
@@ -328,6 +339,18 @@ export default function PriceMatrixPage() {
 
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2">
+        <div className="md:hidden bg-white p-4 rounded-xl border border-slate-200 shadow-sm sticky top-0 z-30">
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Seleccionar Vehículo</label>
+          <select
+            value={mobileVehicleId}
+            onChange={e => setMobileVehicleId(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5 font-bold"
+          >
+            {vehicles.map(v => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </div>
         {['hora', 'turno', 'abono'].map((typeKey) => {
           const typeTariffs = groupedTariffs[typeKey as TariffType];
           if (!typeTariffs || typeTariffs.length === 0) return null;
@@ -344,11 +367,11 @@ export default function PriceMatrixPage() {
                 <h3 className="font-bold text-slate-800 text-lg">{conf.label}</h3>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm text-left">
-                  <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
+                  <thead className="text-xs text-slate-500 uppercase bg-slate-50">
                     <tr>
-                      <th className="px-6 py-3 font-medium tracking-wider w-1/3">Concepto</th>
+                      <th className="sticky left-0 z-20 px-6 py-3 font-bold tracking-wider min-w-[200px] w-1/3 text-slate-400 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">Concepto</th>
                       {vehicles.map(v => (
                         <th key={v.id} className="px-4 py-3 font-bold text-center text-slate-700 min-w-[120px]">
                           <div className="flex flex-col items-center gap-1">
@@ -361,8 +384,8 @@ export default function PriceMatrixPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {typeTariffs.map((tariff) => (
-                      <tr key={tariff.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-3 font-medium text-slate-700">{tariff.name}</td>
+                      <tr key={tariff.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="sticky left-0 z-10 px-6 py-3 font-medium text-slate-700 bg-white group-hover:bg-slate-50 transition-colors shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">{tariff.name}</td>
                         {vehicles.map((v) => {
                           const cellKey = `${tariff.id}-${v.id}`;
                           const isSaving = savingCells.has(cellKey);
@@ -395,6 +418,38 @@ export default function PriceMatrixPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="md:hidden flex flex-col divide-y divide-slate-100">
+                {typeTariffs.map(tariff => {
+                  const cellKey = `${tariff.id}-${mobileVehicleId}`;
+                  const isSaving = savingCells.has(cellKey);
+                  return (
+                    <div key={tariff.id} className="p-4 flex flex-col gap-2">
+                      <span className="font-bold text-slate-700 text-sm">{tariff.name}</span>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2.5 text-slate-400 font-light text-sm">$</span>
+                        <input
+                          type="number"
+                          defaultValue={getPriceValue(tariff.id, mobileVehicleId)}
+                          onBlur={(e) => handlePriceBlur(tariff.id, mobileVehicleId, e.target.value)}
+                          className={cn(
+                            "w-full pl-7 pr-3 py-2 text-right font-mono font-bold text-lg rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                            isSaving 
+                              ? "bg-indigo-50 border-indigo-200 text-indigo-700" 
+                              : "bg-slate-50 border-slate-300 text-slate-900 focus:bg-white"
+                          )}
+                          placeholder="-"
+                        />
+                        {isSaving && (
+                          <div className="absolute right-3 top-3">
+                            <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );

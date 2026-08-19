@@ -131,17 +131,17 @@ export default function IncidentsPage() {
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
+                        <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] font-bold hidden md:table-header-group">
                             <tr>
                                 <th className="px-5 py-3">Fecha</th>
                                 <th className="px-5 py-3">Operador</th>
                                 <th className="px-5 py-3">Descripción</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 block md:table-row-group p-3 md:p-0 bg-slate-50/30 md:bg-transparent">
                             {filteredIncidents.length === 0 && (
-                                <tr>
-                                    <td colSpan={3} className="px-5 py-14 text-center">
+                                <tr className="block md:table-row">
+                                    <td colSpan={3} className="px-5 py-14 text-center block md:table-cell">
                                         <ShieldAlert className="h-10 w-10 text-slate-300 mx-auto mb-3" />
                                         <p className="text-slate-400 font-medium text-base">No se encontraron incidentes.</p>
                                         <p className="text-slate-300 text-sm mt-1">Ajustá los filtros o verificá que existan registros.</p>
@@ -149,24 +149,48 @@ export default function IncidentsPage() {
                                 </tr>
                             )}
                             {filteredIncidents.map(incident => (
-                                <tr key={incident.id} className="hover:bg-slate-50/70 transition-colors group">
-                                    <td className="px-5 py-3.5 text-slate-600 text-xs whitespace-nowrap">
-                                        {formatDate(incident.created_at)}
-                                    </td>
-                                    <td className="px-5 py-3.5">
-                                        <div className="flex items-center gap-2">
-                                            <div className="h-7 w-7 rounded-full bg-red-100 flex items-center justify-center text-red-700 text-[11px] font-black flex-shrink-0">
-                                                {incident.operator?.charAt(0).toUpperCase() || '?'}
+                                <React.Fragment key={incident.id}>
+                                    <tr className="md:hidden block bg-white border border-slate-200 rounded-xl mb-4 p-4 shadow-sm">
+                                        <td className="block space-y-3">
+                                            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="h-8 w-8 rounded-full bg-red-100 flex items-center justify-center text-red-700 text-[12px] font-black flex-shrink-0">
+                                                        {incident.operator?.charAt(0).toUpperCase() || '?'}
+                                                    </div>
+                                                    <div className="font-bold text-slate-800 text-sm">
+                                                        {incident.operator || <span className="text-slate-400 italic">Sin nombre</span>}
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-slate-500 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 font-medium">
+                                                    {formatDate(incident.created_at)}
+                                                </div>
                                             </div>
-                                            <span className="font-semibold text-slate-800">
-                                                {incident.operator || <span className="text-slate-400 italic">Sin nombre</span>}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3.5 text-slate-600 max-w-md">
-                                        <p className="leading-relaxed">{incident.description || <span className="text-slate-400 italic">Sin descripción</span>}</p>
-                                    </td>
-                                </tr>
+                                            <div className="bg-red-50/50 p-3 rounded-xl border border-red-100">
+                                                <p className="text-sm text-slate-700 leading-relaxed">
+                                                    {incident.description || <span className="text-slate-400 italic">Sin descripción</span>}
+                                                </p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr className="hidden md:table-row hover:bg-slate-50/70 transition-colors group">
+                                        <td className="px-5 py-3.5 text-slate-600 text-xs whitespace-nowrap">
+                                            {formatDate(incident.created_at)}
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-7 w-7 rounded-full bg-red-100 flex items-center justify-center text-red-700 text-[11px] font-black flex-shrink-0">
+                                                    {incident.operator?.charAt(0).toUpperCase() || '?'}
+                                                </div>
+                                                <span className="font-semibold text-slate-800">
+                                                    {incident.operator || <span className="text-slate-400 italic">Sin nombre</span>}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="px-5 py-3.5 text-slate-600 max-w-md">
+                                            <p className="leading-relaxed">{incident.description || <span className="text-slate-400 italic">Sin descripción</span>}</p>
+                                        </td>
+                                    </tr>
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>

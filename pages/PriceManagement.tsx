@@ -110,6 +110,17 @@ export default function PriceManagement() {
 
   // --- UI State ---
   const [selectedList, setSelectedList] = useState<PriceListType>('standard');
+  const [mobileVehicleId, setMobileVehicleId] = useState<string>('');
+
+  useEffect(() => {
+    if (vehicles.length > 0) {
+      if (!mobileVehicleId || !vehicles.find(v => v.id === mobileVehicleId)) {
+        setMobileVehicleId(vehicles[0].id);
+      }
+    } else {
+      setMobileVehicleId('');
+    }
+  }, [vehicles, mobileVehicleId]);
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [syncingCells, setSyncingCells] = useState<Set<string>>(new Set());
   const [isSavingGlobalConfig, setIsSavingGlobalConfig] = useState(false);
@@ -408,34 +419,38 @@ export default function PriceManagement() {
   // --- 3. UI Components ---
 
   const TabNavigator = () => (
-    <div className="flex p-1 gap-1 bg-slate-200/50 rounded-xl mb-8 border border-slate-200 shadow-inner overflow-x-auto">
+    <div className="grid grid-cols-3 lg:flex p-1 gap-1 bg-slate-200/50 rounded-xl mb-8 border border-slate-200 shadow-inner" role="tablist">
       {[
-        { id: 'matrix', label: 'Matriz de Precios', icon: DollarSign },
-        { id: 'tariffs', label: 'Config. Tarifas', icon: Clock },
-        { id: 'vehicles', label: 'Tipos de Vehículo', icon: Car },
+        { id: 'matrix', label: 'Matriz', desktopLabel: 'Matriz de Precios', icon: DollarSign },
+        { id: 'tariffs', label: 'Tarifas', desktopLabel: 'Config. Tarifas', icon: Clock },
+        { id: 'vehicles', label: 'Vehículos', desktopLabel: 'Tipos de Vehículo', icon: Car },
       ].map(tab => {
         const isActive = activeTab === tab.id;
         const Icon = tab.icon;
         return (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={isActive}
+            aria-label={tab.desktopLabel}
             onClick={() => setActiveTab(tab.id as TabType)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-bold transition-all duration-300 whitespace-nowrap",
+              "flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 px-1 lg:px-4 py-2 lg:py-3 rounded-lg text-[10px] lg:text-sm font-bold transition-all duration-300",
               isActive
                 ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 ring-1 ring-white/20"
                 : "text-slate-500 hover:bg-white hover:text-slate-700 hover:shadow-sm"
             )}
           >
-            <Icon className={cn("h-4 w-4", isActive ? "text-indigo-200" : "text-slate-400")} />
-            {tab.label}
+            <Icon className={cn("h-4 w-4 lg:h-4 lg:w-4", isActive ? "text-indigo-200" : "text-slate-400")} />
+            <span className="lg:hidden">{tab.label}</span>
+            <span className="hidden lg:inline">{tab.desktopLabel}</span>
           </button>
         );
       })}
     </div>
   );
 
-  const MatrixSection = ({ title, type, icon: Icon, colorClass }: { title: string, type: TariffType, icon: any, colorClass: string }) => {
+  const DesktopMatrixSection = ({ title, type, icon: Icon, colorClass }: { title: string, type: TariffType, icon: any, colorClass: string }) => {
     const sectionTariffs = tariffs.filter(t => t.type === type);
     if (sectionTariffs.length === 0) return null;
 
@@ -502,7 +517,7 @@ export default function PriceManagement() {
     };
 
     return (
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-8 animate-in fade-in slide-in-from-bottom-4">
+      <div className="hidden lg:block bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-8 animate-in fade-in slide-in-from-bottom-4">
         <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex items-center gap-3 backdrop-blur-sm">
           <div className={cn("p-2 rounded-lg shadow-sm", colorClass)}>
             <Icon className="h-5 w-5" />
@@ -534,9 +549,9 @@ export default function PriceManagement() {
             className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent"
           >
             <table className="w-full text-sm text-left">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
-                <th className="px-6 py-4 font-bold tracking-wider w-1/3 text-slate-400">Concepto</th>
+                <th className="sticky left-0 z-20 px-6 py-4 font-bold tracking-wider min-w-[200px] w-1/3 text-slate-400 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">Concepto</th>
                 {sortedVehicles.map(v => {
                   const VIcon = VEHICLE_ICONS[v.icon_key as string] || Car;
                   return (
@@ -555,7 +570,7 @@ export default function PriceManagement() {
             <tbody className="divide-y divide-slate-100">
               {sectionTariffs.map((t) => (
                 <tr key={t.id} className="hover:bg-slate-50/80 transition-colors group">
-                  <td className="px-6 py-4 font-bold text-slate-700 flex items-center gap-2">
+                  <td className="sticky left-0 z-10 px-6 py-4 font-bold text-slate-700 flex items-center gap-2 bg-white group-hover:bg-slate-50 transition-colors shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]">
                     {t.name}
                     {t.is_protected && (
                       <div className="tooltip" title="Tarifa protegida por sistema">
@@ -612,6 +627,101 @@ export default function PriceManagement() {
   };
 
   // --- 4. Sub-Tabs Logic ---
+
+
+  const MobileVehicleSelector = () => {
+    if (vehicles.length === 0) return null;
+    const selected = vehicles.find(v => v.id === mobileVehicleId);
+    const VIcon = selected ? (VEHICLE_ICONS[selected.icon_key as string] || Car) : Car;
+    
+    return (
+      <div className="lg:hidden mb-6 bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-center gap-3">
+        <div className={cn("h-10 w-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm", selected ? getColorClasses(selected.color_key || 'slate', true) : 'bg-slate-200')}>
+          <VIcon size={20} strokeWidth={2.5} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <label htmlFor="mobile-vehicle-select" className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1">Vehículo Seleccionado</label>
+          <select
+            id="mobile-vehicle-select"
+            value={mobileVehicleId}
+            onChange={(e) => setMobileVehicleId(e.target.value)}
+            className="w-full bg-white border border-slate-300 text-slate-900 font-bold text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 truncate"
+          >
+            {vehicles.map(v => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    );
+  };
+
+  const MobileMatrixSection = ({ title, type, icon: Icon, colorClass }: { title: string, type: TariffType, icon: any, colorClass: string }) => {
+    const sectionTariffs = tariffs.filter(t => t.type === type);
+    if (sectionTariffs.length === 0 || !mobileVehicleId) return null;
+
+    const selectedVehicle = vehicles.find(v => v.id === mobileVehicleId);
+    if (!selectedVehicle) return null;
+
+    return (
+      <div className="lg:hidden bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-200 flex items-center gap-3 backdrop-blur-sm">
+          <div className={cn("p-1.5 rounded-lg shadow-sm", colorClass)}>
+            <Icon className="h-4 w-4" />
+          </div>
+          <h3 className="font-bold text-slate-800 text-base tracking-tight">{title}</h3>
+        </div>
+        <div className="flex flex-col divide-y divide-slate-100">
+          {sectionTariffs.map((t) => {
+            const cellKey = `${t.id}-${selectedVehicle.id}`;
+            const isSaving = savingCells.has(cellKey);
+            const isSyncing = syncingCells.has(cellKey);
+            return (
+              <div key={t.id} className="flex items-center justify-between p-4 group hover:bg-slate-50/50 transition-colors gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-slate-700 text-sm break-words whitespace-normal min-w-0">{t.name}</span>
+                  {t.is_protected && (
+                    <div className="tooltip shrink-0" title="Tarifa protegida por sistema">
+                      <Lock className="h-3 w-3 text-amber-400" />
+                    </div>
+                  )}
+                </div>
+                <div className="w-[120px] shrink-0 relative">
+                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-light text-sm pointer-events-none">$</span>
+                   <input
+                     type="number"
+                     min="0"
+                     defaultValue={getPriceValue(t.id, selectedVehicle.id)}
+                     onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                     onBlur={(e) => handlePriceUpsert(t.id, selectedVehicle.id, e.target.value)}
+                     className={cn(
+                       "no-spinner w-full pl-6 pr-3 py-2 text-right font-mono font-bold text-base rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                       isSyncing
+                         ? "bg-amber-50 border-amber-300 text-amber-700 shadow-inner"
+                         : isSaving
+                           ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                           : "bg-white border-slate-300 focus:border-indigo-500 text-slate-700"
+                     )}
+                     placeholder="-"
+                   />
+                   {isSyncing && (
+                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                       <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
+                     </div>
+                   )}
+                   {isSaving && !isSyncing && (
+                     <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                       <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                     </div>
+                   )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   const VehiclesTab = () => {
     const [newName, setNewName] = useState('');
@@ -692,7 +802,7 @@ export default function PriceManagement() {
 
             <div className="shrink-0">
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Icono Visual</label>
-              <div className="flex gap-2 h-[50px]">
+              <div className="grid grid-cols-4 sm:grid-cols-6 lg:flex gap-2 lg:h-[50px]">
                 {Object.keys(VEHICLE_ICONS).map((key) => {
                   const Icon = VEHICLE_ICONS[key];
                   const isSelected = selectedIcon === key;
@@ -719,7 +829,7 @@ export default function PriceManagement() {
 
             <div className="shrink-0">
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Color</label>
-              <div className="flex gap-2 h-[50px] items-center bg-slate-50 border border-slate-200 px-3 rounded-xl overflow-x-auto">
+              <div className="flex flex-wrap lg:flex-nowrap gap-2 items-center bg-slate-50 border border-slate-200 px-3 py-2 lg:py-0 lg:h-[50px] rounded-xl">
                 {VEHICLE_COLORS.map(c => {
                   const isSelected = selectedColor === c;
                   // Just the raw base colors for the selector swatches
@@ -769,8 +879,8 @@ export default function PriceManagement() {
             const Icon = VEHICLE_ICONS[v.icon_key as string] || Car;
             return (
               <div key={v.id} className="group bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all flex items-center justify-between">
-                <div className="flex items-center gap-5">
-                  <div className={cn("h-12 w-12 rounded-2xl flex items-center justify-center transition-colors shadow-sm", getColorClasses(v.color_key || 'slate', false))}>
+                <div className="flex items-center gap-3 sm:gap-5 min-w-0 flex-1">
+                  <div className={cn("h-10 w-10 sm:h-12 sm:w-12 shrink-0 rounded-2xl flex items-center justify-center transition-colors shadow-sm", getColorClasses(v.color_key || 'slate', false))}>
                     <Icon size={24} strokeWidth={2.5} />
                   </div>
                   <div>
@@ -990,8 +1100,8 @@ export default function PriceManagement() {
       <div className="space-y-8 animate-in fade-in">
         {/* Global Config Card */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-6 relative z-10">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 relative z-10 gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <Timer className="h-5 w-5 text-indigo-600" />
                 Reglas de Cobro Globales
@@ -1029,7 +1139,7 @@ export default function PriceManagement() {
                 <p className="text-xs text-slate-500">Minutos de gracia antes de iniciar el cobro.</p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="relative">
                   <input
                     type="number"
@@ -1204,11 +1314,11 @@ export default function PriceManagement() {
             </div>
 
             {/* Action */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 mt-4 lg:mt-0">
               <button
                 onClick={handleSaveTariff}
                 disabled={!newTariff.name || isSaving}
-                className="w-full h-[106px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full h-12 lg:h-[106px] flex-row lg:flex-col bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSaving ? <Loader2 className="h-6 w-6 animate-spin" /> : <Save className="h-6 w-6" />}
                 <span>Guardar</span>
@@ -1270,7 +1380,7 @@ export default function PriceManagement() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <p className="font-bold text-slate-900 text-base truncate" title={t.name}>{t.name}</p>
+                            <p className="font-bold text-slate-900 text-base break-words whitespace-normal min-w-0">{t.name}</p>
                             {t.is_protected && <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-[10px] font-bold text-amber-700 border border-amber-200 uppercase tracking-wide flex items-center gap-1 shrink-0"><Lock className="h-3 w-3" /> Sist.</span>}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 flex-wrap">
@@ -1283,7 +1393,7 @@ export default function PriceManagement() {
                             const hasChanged = isDraft && maxVehiclesDrafts[t.id] !== t.max_vehicles;
 
                             return (
-                              <div className="mt-2 flex items-center gap-2 bg-slate-50/80 p-1.5 rounded-lg border border-slate-100 w-max relative">
+                              <div className="mt-2 flex flex-wrap items-center gap-2 bg-slate-50/80 p-1.5 rounded-lg border border-slate-100 w-full sm:w-max relative">
                                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
                                   <Users className="h-3 w-3" /> Vehículos Máx.
                                 </span>
@@ -1346,7 +1456,7 @@ export default function PriceManagement() {
               <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-4 fade-in">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 backdrop-blur-md">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="p-2.5 bg-indigo-100 rounded-xl text-indigo-600 shadow-inner">
                       <Edit2 className="h-5 w-5" />
                     </div>
@@ -1465,12 +1575,12 @@ export default function PriceManagement() {
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 backdrop-blur-md">
+                <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50/50 flex flex-col-reverse sm:flex-row justify-end gap-3 backdrop-blur-md">
                   <button
                     type="button"
                     onClick={() => setEditingTariff(null)}
                     disabled={isUpdating}
-                    className="px-6 py-2.5 rounded-xl font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-50"
                   >
                     Cancelar
                   </button>
@@ -1478,7 +1588,7 @@ export default function PriceManagement() {
                     type="button"
                     onClick={handleUpdateTariff}
                     disabled={isUpdating || !editForm.name.trim()}
-                    className="px-6 py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[160px]"
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[160px]"
                   >
                     {isUpdating ? (
                       <>
@@ -1546,7 +1656,7 @@ export default function PriceManagement() {
       {/* Sync Toast Banner */}
       {syncToast && (
         <div className={cn(
-          "mb-4 px-4 py-3 rounded-xl flex items-center gap-3 text-sm font-bold animate-in slide-in-from-top-2 shadow-sm border transition-all",
+          "mb-4 px-4 py-3 rounded-xl flex items-start sm:items-center gap-3 text-sm font-bold animate-in slide-in-from-top-2 shadow-sm border transition-all",
           syncToast.type === 'success' && "bg-emerald-50 border-emerald-200 text-emerald-700",
           syncToast.type === 'error' && "bg-red-50 border-red-200 text-red-700",
           syncToast.type === 'info' && "bg-amber-50 border-amber-200 text-amber-700"
@@ -1554,8 +1664,8 @@ export default function PriceManagement() {
           {syncToast.type === 'success' && <Check className="h-4 w-4 flex-shrink-0" />}
           {syncToast.type === 'error' && <AlertCircle className="h-4 w-4 flex-shrink-0" />}
           {syncToast.type === 'info' && <Info className="h-4 w-4 flex-shrink-0" />}
-          <span className="flex-1">{syncToast.message}</span>
-          <button onClick={() => setSyncToast(null)} className="p-1 hover:opacity-70 transition-opacity">
+          <span className="flex-1 min-w-0 break-words">{syncToast.message}</span>
+          <button onClick={() => setSyncToast(null)} className="p-1 shrink-0 hover:opacity-70 transition-opacity">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -1587,7 +1697,7 @@ export default function PriceManagement() {
               <p className="text-slate-500 mb-8 text-center max-w-sm text-lg">
                 Para ver la matriz de precios, primero debes configurar tus vehículos y tarifas.
               </p>
-              <div className="flex gap-4">
+              <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto px-4 sm:px-0">
                 <button
                   onClick={() => setActiveTab('vehicles')}
                   className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-300 hover:border-indigo-300 hover:text-indigo-600 text-slate-700 rounded-xl font-bold transition-all"
@@ -1605,9 +1715,14 @@ export default function PriceManagement() {
           ) : (
             <>
               {/* Note: We map DB type back to UI Logic for the sections */}
-              <MatrixSection title="Valores por Hora y Fracción" type="hora" icon={Clock} colorClass="bg-blue-100 text-blue-600" />
-              <MatrixSection title="Estadías y Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
-              <MatrixSection title="Abonos Mensuales" type="abono" icon={Zap} colorClass="bg-emerald-100 text-emerald-600" />
+              <MobileVehicleSelector />
+              <DesktopMatrixSection title="Valores por Hora y Fracción" type="hora" icon={Clock} colorClass="bg-blue-100 text-blue-600" />
+              <DesktopMatrixSection title="Estadías y Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
+              <DesktopMatrixSection title="Abonos Mensuales" type="abono" icon={Zap} colorClass="bg-emerald-100 text-emerald-600" />
+              
+              <MobileMatrixSection title="Valores por Hora y Fracción" type="hora" icon={Clock} colorClass="bg-blue-100 text-blue-600" />
+              <MobileMatrixSection title="Estadías y Anticipados" type="turno" icon={CalendarDays} colorClass="bg-indigo-100 text-indigo-600" />
+              <MobileMatrixSection title="Abonos Mensuales" type="abono" icon={Zap} colorClass="bg-emerald-100 text-emerald-600" />
             </>
           )
         )}

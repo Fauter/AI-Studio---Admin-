@@ -500,36 +500,47 @@ export default function SettingsPage() {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="border-b border-slate-200 flex gap-6">
+      <div className="border-b border-slate-200 grid grid-cols-3 md:flex md:gap-6" role="tablist">
         <button
+          role="tab"
+          aria-selected={activeTab === 'general'}
           onClick={() => setActiveTab('general')}
           className={cn(
-            "pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+            "pb-2 md:pb-3 text-sm font-medium border-b-2 transition-colors flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2",
             activeTab === 'general' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           )}
         >
-          <Info className="h-4 w-4" />
-          General
+          <Info className="h-4 w-4 md:h-4 md:w-4" />
+          <span className="md:hidden text-[11px] font-bold">General</span>
+          <span className="hidden md:inline">General</span>
         </button>
         <button
+          role="tab"
+          aria-selected={activeTab === 'building'}
+          aria-label="Estructura del Edificio"
           onClick={() => setActiveTab('building')}
           className={cn(
-            "pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+            "pb-2 md:pb-3 text-sm font-medium border-b-2 transition-colors flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2",
             activeTab === 'building' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           )}
         >
-          <Building2 className="h-4 w-4" />
-          Estructura del Edificio
+          <Building2 className="h-4 w-4 md:h-4 md:w-4" />
+          <span className="md:hidden text-[11px] font-bold">Estructura</span>
+          <span className="hidden md:inline">Estructura del Edificio</span>
         </button>
         <button
+          role="tab"
+          aria-selected={activeTab === 'data'}
+          aria-label="Carga Datos"
           onClick={() => setActiveTab('data')}
           className={cn(
-            "pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+            "pb-2 md:pb-3 text-sm font-medium border-b-2 transition-colors flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2",
             activeTab === 'data' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           )}
         >
-          <Database className="h-4 w-4" />
-          Carga Datos
+          <Database className="h-4 w-4 md:h-4 md:w-4" />
+          <span className="md:hidden text-[11px] font-bold">Datos</span>
+          <span className="hidden md:inline">Carga Datos</span>
         </button>
       </div>
 

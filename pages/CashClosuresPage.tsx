@@ -408,19 +408,20 @@ export default function CashClosuresPage() {
         });
     }, [shiftCloses, partialCloses, movements, searchTerm, dateFrom, dateTo]);
 
-    const tabs: { key: TabKey; label: string; icon: React.ElementType; count?: number; customActiveColors?: string; customBadgeColors?: string; }[] = [
-        { key: 'computo', label: 'Cómputo', icon: Calculator },
-        { key: 'shifts', label: 'Cierres de Turno', icon: Clock, count: pendingShifts.length },
-        { key: 'partials', label: 'Retiros Parciales', icon: ArrowDownCircle, count: pendingPartials.length },
+    const tabs: { key: TabKey; label: string; mobileAlias?: string; icon: React.ElementType; count?: number; customActiveColors?: string; customBadgeColors?: string; }[] = [
+        { key: 'computo', label: 'Cómputo', mobileAlias: 'Cómputo', icon: Calculator },
+        { key: 'shifts', label: 'Cierres de Turno', mobileAlias: 'Cierres', icon: Clock, count: pendingShifts.length },
+        { key: 'partials', label: 'Retiros Parciales', mobileAlias: 'Retiros', icon: ArrowDownCircle, count: pendingPartials.length },
         { 
             key: 'expenses', 
-            label: 'Egresos', 
+            label: 'Egresos',
+            mobileAlias: 'Egresos',
             icon: ReceiptText, 
             count: expenseRows.length,
             customActiveColors: 'border-red-600 text-red-700 bg-white',
             customBadgeColors: 'bg-red-100 text-red-700'
         },
-        { key: 'history', label: 'Historial', icon: History },
+        { key: 'history', label: 'Historial', mobileAlias: 'Historial', icon: History },
     ];
 
     if (loading) {
@@ -478,45 +479,50 @@ export default function CashClosuresPage() {
             {/* Tabs */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 {/* Tab Header */}
-                <div className="flex items-stretch border-b border-slate-200 bg-slate-50/50">
-                    <div className="flex flex-1 min-w-0 overflow-x-auto scrollbar-hide">
+                <div className="flex flex-col lg:flex-row items-stretch border-b border-slate-200 bg-slate-50/50" role="tablist">
+                    <div className="grid grid-cols-5 lg:flex lg:flex-1 min-w-0">
                         {tabs.map(tab => {
                             const Icon = tab.icon;
                             const isActive = activeTab === tab.key;
                             return (
                                 <button
                                     key={tab.key}
+                                    role="tab"
+                                    aria-selected={isActive}
+                                    aria-label={tab.label}
                                     onClick={() => setActiveTab(tab.key)}
-                                    className={`flex items-center gap-2 px-5 py-3.5 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
+                                    className={`flex flex-col lg:flex-row justify-center items-center gap-1 lg:gap-2 px-1 lg:px-5 py-2 lg:py-3.5 text-[9px] min-[360px]:text-[10px] sm:text-xs lg:text-sm font-bold border-b-2 transition-all text-center leading-tight min-h-[56px] lg:min-h-0 border-r border-r-slate-200/50 last:border-r-0 lg:border-r-0 ${
                                         isActive
                                             ? tab.customActiveColors || 'border-emerald-600 text-emerald-700 bg-white'
-                                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-white hover:border-slate-300'
                                         }`}
                                 >
-                                    <Icon className={`h-4 w-4 ${isActive ? (tab.customActiveColors ? 'text-red-600' : 'text-emerald-600') : 'text-slate-400'}`} />
-                                    {tab.label}
-                                    {tab.count !== undefined && tab.count > 0 && (
-                                        <span className={`inline-flex items-center justify-center text-[10px] font-black px-1.5 py-0.5 rounded-full ${
-                                            isActive 
-                                                ? tab.customBadgeColors || 'bg-emerald-100 text-emerald-700' 
-                                                : 'bg-slate-200 text-slate-600'
-                                        }`}>
-                                            {tab.count}
-                                        </span>
-                                    )}
+                                    <Icon className={`h-4 w-4 lg:h-4 lg:w-4 flex-shrink-0 ${isActive ? (tab.customActiveColors ? 'text-red-600' : 'text-emerald-600') : 'text-slate-400'}`} />
+                                    <div className="flex flex-col lg:flex-row items-center gap-0.5 lg:gap-2">
+                                        <span className="lg:hidden">{tab.mobileAlias || tab.label}</span>
+                                        <span className="hidden lg:inline">{tab.label}</span>
+                                        {tab.count !== undefined && tab.count > 0 && (
+                                            <span className={`inline-flex items-center justify-center text-[9px] lg:text-[10px] font-black px-1.5 py-0.5 rounded-full ${
+                                                isActive 
+                                                    ? tab.customBadgeColors || 'bg-emerald-100 text-emerald-700' 
+                                                    : 'bg-slate-200 text-slate-600'
+                                            }`}>
+                                                {tab.count}
+                                            </span>
+                                        )}
+                                    </div>
                                 </button>
                             );
                         })}
                     </div>
                     {activeTab === 'expenses' && (
-                        <div className="flex-shrink-0 flex items-center pr-2 pl-2 md:pr-4 border-l border-slate-200/60 bg-slate-50">
+                        <div className="flex-shrink-0 flex items-center justify-center p-3 lg:pr-4 lg:pl-2 border-t lg:border-t-0 lg:border-l border-slate-200/60 bg-slate-50">
                             <button
                                 onClick={() => setIsExpenseModalOpen(true)}
-                                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 md:px-4 md:py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs md:text-sm rounded-xl transition-colors shadow-sm"
+                                className="w-full lg:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-colors shadow-sm"
                             >
                                 <Plus className="h-4 w-4" />
-                                <span className="hidden sm:inline">Agregar Gasto</span>
-                                <span className="sm:hidden">Gasto</span>
+                                <span>Agregar Gasto</span>
                             </button>
                         </div>
                     )}
