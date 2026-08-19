@@ -19,9 +19,8 @@ import {
     Subscription,
     Debt,
     Cochera,
-    Expense,
     UnifiedTransaction
-} from './cash-flow/CashFlowShared';
+, getExpenseDisplayText} from './cash-flow/CashFlowShared';
 import { usePeakStays } from './cash-flow/usePeakStays';
 import KpiGrid from './cash-flow/KpiGrid';
 import ChartsSection from './cash-flow/ChartsSection';
@@ -60,10 +59,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
 
     const {
         movements, stays, allStays, vehicles, employees, subscriptions, debts, customers,
-        cocheras, buildingLevels, expenses, tariffs, vehicleTypes, prices,
+        cocheras, buildingLevels, expensePartialCloses: storeExpenses, tariffs, vehicleTypes, prices,
         loadingTier1: loading, loadingTier2, loadingProgress, loadingStep, error,
         fetchTier1, fetchTier2,
-        addExpense
+        addExpensePartialClose
     } = useCashFlowStore();
 
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -126,7 +125,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const gVehicles = useMemo(() => selectedGarageId === 'all' ? vehicles : vehicles.filter(v => v.garage_id === selectedGarageId), [vehicles, selectedGarageId]);
     const gCocheras = useMemo(() => selectedGarageId === 'all' ? cocheras : cocheras.filter(c => c.garage_id === selectedGarageId), [cocheras, selectedGarageId]);
     const gLevels = useMemo(() => selectedGarageId === 'all' ? buildingLevels : buildingLevels.filter(l => l.garage_id === selectedGarageId), [buildingLevels, selectedGarageId]);
-    const gExpenses = useMemo(() => selectedGarageId === 'all' ? expenses : expenses.filter(e => e.garage_id === selectedGarageId), [expenses, selectedGarageId]);
+    const gExpenses = useMemo(() => selectedGarageId === 'all' ? storeExpenses : storeExpenses.filter(e => e.garage_id === selectedGarageId), [storeExpenses, selectedGarageId]);
 
     // For Subscriptions Modal (Needs all data independently of selectedGarageId)
     const allActiveSubscriptions = useMemo(() => {
@@ -151,37 +150,48 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         const hoyMs = inicioHoy.getTime();
         const ayerMs = inicioAyer.getTime();
         const mananaMs = inicioManana.getTime();
-        let todayTotal = 0, yesterdayTotal = 0;
+        let todayTotal = 0, yesterdayTotal = 0, expensesToday = 0;
         gMovements.forEach(m => {
             if (!m.timestamp) return;
-            // Only count income types (CobroEstadia + CobroAbono + INGRESO + COBRO + CAJA_INICIAL)
-            const isIngreso = m.type === 'CobroEstadia' || (m.type as string) === 'CobroAbono'
-                || m.type === 'INGRESO' || m.type === 'COBRO' || m.type === 'CAJA_INICIAL';
+            const isIngreso = m.type === 'CobroEstadia' || (m.type as string) === 'CobroAbono' || m.type === 'INGRESO' || m.type === 'COBRO' || m.type === 'CAJA_INICIAL';
             if (!isIngreso) return;
             const ts = new Date(m.timestamp).getTime();
             const amt = Number(m.amount ?? 0);
             if (ts >= hoyMs && ts < mananaMs) todayTotal += amt;
             if (ts >= ayerMs && ts < hoyMs) yesterdayTotal += amt;
         });
+        storeExpenses?.forEach(e => {
+            const ts = new Date(e.created_at).getTime();
+            if (ts >= hoyMs && ts < mananaMs) expensesToday += Number(e.amount ?? 0);
+        });
         const variation = yesterdayTotal === 0 ? (todayTotal > 0 ? 100 : 0) : ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100;
-        return { today: todayTotal, yesterday: yesterdayTotal, variation: Math.round(variation) };
-    }, [gMovements]);
+        return { today: todayTotal, yesterday: yesterdayTotal, variation: Math.round(variation), expenses: expensesToday };
+    }, [gMovements, storeExpenses]);
 
     const kpiFacturacion = useMemo(() => {
-        const now = new Date();
-        const currentMonth = now.getMonth(), currentYear = now.getFullYear();
+        const { inicioHoy } = getArgentinaDateAnchors();
+        const currentYear = inicioHoy.getFullYear();
+        const currentMonth = inicioHoy.getMonth();
+        const inicioMes = new Date(currentYear, currentMonth, 1, 0, 0, 0, 0).getTime();
+        const inicioMesSiguiente = new Date(currentYear, currentMonth + 1, 1, 0, 0, 0, 0).getTime();
         const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
         const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-        let currentTotal = 0, prevTotal = 0;
+        const inicioMesAnterior = new Date(prevYear, prevMonth, 1, 0, 0, 0, 0).getTime();
+        let currentTotal = 0, prevTotal = 0, expensesMonth = 0;
         gMovements.forEach(m => {
-            const d = new Date(m.timestamp);
+            if (!m.timestamp) return;
+            const ts = new Date(m.timestamp).getTime();
             const amt = Number(m.amount || 0);
-            if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) currentTotal += amt;
-            else if (d.getFullYear() === prevYear && d.getMonth() === prevMonth) prevTotal += amt;
+            if (ts >= inicioMes && ts < inicioMesSiguiente) currentTotal += amt;
+            else if (ts >= inicioMesAnterior && ts < inicioMes) prevTotal += amt;
+        });
+        storeExpenses?.forEach(e => {
+            const ts = new Date(e.created_at).getTime();
+            if (ts >= inicioMes && ts < inicioMesSiguiente) expensesMonth += Number(e.amount || 0);
         });
         const variation = prevTotal === 0 ? (currentTotal > 0 ? 100 : 0) : ((currentTotal - prevTotal) / prevTotal) * 100;
-        return { current: currentTotal, previous: prevTotal, variation: Math.round(variation) };
-    }, [gMovements]);
+        return { current: currentTotal, previous: prevTotal, variation: Math.round(variation), expenses: expensesMonth };
+    }, [gMovements, storeExpenses]);
 
     const monthlyHistory = useMemo(() => {
         const buckets: Record<string, number> = {};
@@ -603,9 +613,9 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             const activeSubs = vehicles.filter(v => v.garage_id === g.id && v.is_subscriber === true).length;
 
             // ── Egresos mensuales por sucursal ──
-            const garageExpenses = expenses.filter(e => {
+            const garageExpenses = storeExpenses.filter(e => {
                 if (e.garage_id !== g.id) return false;
-                const ts = new Date(e.expense_date).getTime();
+                const ts = new Date(e.created_at).getTime();
                 return ts >= inicioMes && ts < mananaMs;
             });
             const monthlyExpenses = garageExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);
@@ -616,10 +626,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 id: g.id, name: g.name || 'Sin Nombre', effectivo, digital, total: todayTotal,
                 occupancy, deuda, spots, occupied, activeSubs,
                 monthlyExpenses, expenseCount: garageExpenses.length, monthlyRevenue,
-                expenses: garageExpenses
+                expenses: garageExpenses as any
             };
         });
-    }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera, expenses]);
+    }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera, storeExpenses]);
 
     // §4f. Filtered Movements
     const filteredMovements = useMemo(() => {
@@ -651,49 +661,40 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
     const totalCaja = useMemo(() => filteredMovements.reduce((acc, m) => acc + Number(m.amount || 0), 0), [filteredMovements]);
 
     // §4g. Unified Transactions — merge movements + expenses for Registro de Actividad
+    const filteredExpensePartialCloses = useMemo(() => {
+        let result = storeExpenses || [];
+        if (filters.vehicleType || filters.tariffType || filters.paymentMethod) return [];
+        if (filters.operatorId) {
+            const empName = employees.find(e => e.id === filters.operatorId)?.full_name;
+            if (empName) result = result.filter(e => e.operator === empName);
+        }
+        if (filters.exactDate) result = result.filter(e => e.created_at.startsWith(filters.exactDate));
+        else {
+            if (filters.startDate) { const s = new Date(filters.startDate + 'T00:00:00').getTime(); result = result.filter(e => new Date(e.created_at).getTime() >= s); }
+            if (filters.endDate) { const eT = new Date(filters.endDate + 'T23:59:59').getTime(); result = result.filter(e => new Date(e.created_at).getTime() <= eT); }
+        }
+        return result;
+    }, [storeExpenses, filters, employees]);
+
     const unifiedTransactions = useMemo<UnifiedTransaction[]>(() => {
         const movementTxns: UnifiedTransaction[] = filteredMovements.map(m => ({
-            id: m.id,
-            source: 'movement' as const,
-            garage_id: m.garage_id,
-            timestamp: m.timestamp,
-            amount: Number(m.amount ?? 0),
-            description: m.notes || '---',
-            plate: m.plate || null,
-            type: m.type,
-            payment_method: m.payment_method || null,
-            operator: m.operator || null,
-            related_entity_id: m.related_entity_id,
-            ticket_number: m.ticket_number,
-            invoice_type: m.invoice_type,
-            vehicle_type: m.vehicle_type,
+            id: m.id, source: 'movement' as const, garage_id: m.garage_id, timestamp: m.timestamp, amount: Number(m.amount ?? 0),
+            description: m.notes || '---', plate: m.plate || null, type: m.type, payment_method: m.payment_method || null,
+            operator: m.operator || null, ticket_number: m.ticket_number, invoice_type: m.invoice_type, vehicle_type: m.vehicle_type,
         }));
-
-        const expenseTxns: UnifiedTransaction[] = gExpenses.map(e => ({
-            id: e.id,
-            source: 'expense' as const,
-            garage_id: e.garage_id || '',
-            timestamp: e.expense_date,
-            amount: Number(e.amount ?? 0),
-            description: e.imputation + (e.description ? ` — ${e.description}` : ''),
-            plate: null,
-            type: 'EGRESO',
-            payment_method: '---',
-            operator: e.created_by || null,
-            expense_type: e.expense_type,
-            imputation: e.imputation,
-            custom_garage_name: e.custom_garage_name,
+        const expenseTxns: UnifiedTransaction[] = filteredExpensePartialCloses.map(e => ({
+            id: e.id, source: 'expense' as const, garage_id: e.garage_id || '', timestamp: e.created_at, amount: Number(e.amount ?? 0),
+            description: getExpenseDisplayText(e.recipient_name, e.notes), plate: null, type: 'EGRESO', payment_method: '---',
+            operator: e.operator || null, recipient_name: e.recipient_name, notes: e.notes,
         }));
-
-        return [...movementTxns, ...expenseTxns]
-            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    }, [filteredMovements, gExpenses]);
+        return [...movementTxns, ...expenseTxns].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }, [filteredMovements, filteredExpensePartialCloses]);
 
     const totalCajaUnified = useMemo(() => {
         const ingresos = filteredMovements.reduce((acc, m) => acc + Number(m.amount || 0), 0);
-        const egresos = gExpenses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+        const egresos = filteredExpensePartialCloses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
         return ingresos - egresos;
-    }, [filteredMovements, gExpenses]);
+    }, [filteredMovements, filteredExpensePartialCloses]);
 
     // Functions removed, logic is preserved
 
@@ -848,10 +849,10 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 {activeSection === 'egresos' && (
                     <ExpensesSection
                         garages={garages}
-                        expenses={gExpenses}
+                        expenses={gExpenses as any}
                         selectedGarageId={selectedGarageId}
                         profile={profile}
-                        onExpenseCreated={addExpense}
+                        onPartialCloseCreated={addExpensePartialClose}
                         getGarageName={getGarageName}
                         GarageFilter={<GarageFilter />}
                     />

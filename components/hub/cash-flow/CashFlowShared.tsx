@@ -85,19 +85,17 @@ export type ActiveSection = 'resumen' | 'sucursal' | 'registro' | 'egresos';
 
 
 // ── Expense (executed expense record) ──
-export interface Expense {
+export interface PartialClose {
     id: string;
-    garage_id: string | null;
-    owner_id: string;
-    template_id: string | null;
-    description?: string | null;
-    imputation: string;
-    custom_garage_name?: string | null;
-    amount: number;
-    expense_type: string;
-    expense_date: string;   // ISO timestamp
+    garage_id: string;
+    operator: string;
     created_at: string;
-    created_by: string | null;
+    amount: number;
+    movement_type: 'expense' | 'withdrawal';
+    notes: string | null;
+    recipient_name: string | null;
+    is_withdrawn: boolean;
+    withdrawn_by_name: string | null;
 }
 
 // ── Unified Transaction (for MovementsTable merge) ──
@@ -241,3 +239,13 @@ export function OperationClock() {
 export type PeakMode = "occupancy" | "entries" | "exits";
 export type PeakPeriod = "today" | "7_days" | "15_days" | "30_days" | "60_days" | "90_days";
 export type ChartView = "historical" | "hourly-profile";
+
+export function getExpenseDisplayText(recipientName?: string | null, notes?: string | null): string {
+    let r = recipientName?.trim() || "";
+    let n = notes?.trim() || "";
+    if (r.toLowerCase() === "desconocido") r = "";
+    if (r && n) return r + " - " + n;
+    if (r) return r;
+    if (n) return n;
+    return "—";
+}

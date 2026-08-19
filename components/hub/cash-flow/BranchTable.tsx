@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GitBranch, Building2, ChevronDown, ChevronRight } from 'lucide-react';
-import { cn, formatCurrency, formatDate, Expense } from './CashFlowShared';
+import { cn, formatCurrency, formatDate, getExpenseDisplayText, PartialClose} from './CashFlowShared';
 
 interface BranchBreakdown {
     id: string;
@@ -17,7 +17,7 @@ interface BranchBreakdown {
     monthlyExpenses: number;
     expenseCount: number;
     monthlyRevenue: number;
-    expenses: Expense[];
+    expenses: PartialClose[];
 }
 
 interface BranchTableProps {
@@ -137,14 +137,14 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
                                                         <div className="bg-slate-50/40 p-4 border-t border-slate-100 rounded-b-xl">
                                                             <div className="flex flex-col gap-2">
                                                                 {[...branch.expenses]
-                                                                    .sort((a, b) => new Date(a.expense_date).getTime() - new Date(b.expense_date).getTime())
+                                                                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
                                                                     .map(exp => (
                                                                         <div key={exp.id} className="flex flex-col px-3 py-1.5 bg-white border border-slate-200/60 rounded-xl shadow-sm leading-tight">
                                                                             <span className="text-[9px] text-slate-400 font-mono">
-                                                                                {formatDate(exp.expense_date).replace(',', '')} hs
+                                                                                {formatDate(exp.created_at).replace(',', '')} hs
                                                                             </span>
                                                                             <div className="flex items-center justify-between gap-3 text-[11px] text-slate-600">
-                                                                                <span className="truncate font-medium">{exp.description || exp.expense_type || 'Egreso'}</span>
+                                                                                <span className="truncate font-medium">{getExpenseDisplayText(exp.recipient_name, exp.notes)}</span>
                                                                                 <span className="font-mono font-medium text-rose-500/80">{formatCurrency(Number(exp.amount))}</span>
                                                                             </div>
                                                                         </div>
@@ -223,14 +223,14 @@ export default function BranchTable({ branchBreakdown }: BranchTableProps) {
                                                 <td colSpan={7} className="px-5 py-4">
                                                     <div className="flex flex-wrap gap-3">
                                                         {[...branch.expenses]
-                                                            .sort((a, b) => new Date(a.expense_date).getTime() - new Date(b.expense_date).getTime())
+                                                            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
                                                             .map(exp => (
                                                                 <div key={exp.id} className="flex flex-col px-3 py-1.5 bg-white border border-slate-200/60 rounded-xl min-w-[160px] shadow-sm leading-tight">
                                                                     <span className="text-[9px] text-slate-400 font-mono">
-                                                                        {formatDate(exp.expense_date).replace(',', '')} hs
+                                                                        {formatDate(exp.created_at).replace(',', '')} hs
                                                                     </span>
                                                                     <div className="flex items-center justify-between gap-3 text-[11px] text-slate-600">
-                                                                        <span className="truncate max-w-[160px] font-medium">{exp.description || exp.expense_type || 'Egreso'}</span>
+                                                                        <span className="truncate max-w-[160px] font-medium">{getExpenseDisplayText(exp.recipient_name, exp.notes)}</span>
                                                                         <span className="font-mono font-medium text-rose-500/80">{formatCurrency(Number(exp.amount))}</span>
                                                                     </div>
                                                                 </div>

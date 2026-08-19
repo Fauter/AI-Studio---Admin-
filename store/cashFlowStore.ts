@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { 
-    Movement, Stay, Subscription, Debt, Cochera, Expense
+    Movement, Stay, Subscription, Debt, Cochera, PartialClose
 } from '../components/hub/cash-flow/CashFlowShared';
 import { Garage, BuildingLevel } from '../types';
 
@@ -15,7 +15,7 @@ interface CashFlowState {
     debts: Debt[];
     cocheras: Cochera[];
     buildingLevels: BuildingLevel[];
-    expenses: Expense[];
+    expensePartialCloses: PartialClose[];
     tariffs: any[];
     vehicleTypes: any[];
     prices: any[];
@@ -33,7 +33,7 @@ interface CashFlowState {
     fetchTier1: (garages: Garage[], profileId?: string) => Promise<void>;
     fetchTier2: (garages: Garage[]) => Promise<void>;
 
-    addExpense: (expense: Expense) => void;
+    addExpensePartialClose: (expense: PartialClose) => void;
 }
 
 export const useCashFlowStore = create<CashFlowState>((set, get) => ({
@@ -46,7 +46,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
     debts: [],
     cocheras: [],
     buildingLevels: [],
-    expenses: [],
+    expensePartialCloses: [],
     tariffs: [],
     vehicleTypes: [],
     prices: [],
@@ -61,7 +61,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
     isInitialized: false,
     lastGarageIdsHash: '',
 
-    addExpense: (expense) => set(state => ({ expenses: [expense, ...state.expenses] })),
+    addExpensePartialClose: (expense) => set(state => ({ expensePartialCloses: [expense, ...state.expensePartialCloses] })),
 
     fetchTier1: async (garages, profileId) => {
         if (garages.length === 0) {
@@ -208,7 +208,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
                 trackProgress(fetchVehicles(), 'Vehículos'),
                 trackProgress(retry(() => supabase.from('stays').select('*').in('garage_id', garageIds).eq('active', true).order('entry_time', { ascending: false })), 'Estadías Activas'),
                 trackProgress(retry(() => supabase.from('stays').select('id,garage_id,plate,entry_time,exit_time,vehicle_type,active').in('garage_id', garageIds).gte('entry_time', movementsSince).order('entry_time', { ascending: false }).limit(3000)), 'Histórico de Estadías'),
-                trackProgress(retry(() => supabase.from('expenses').select('id, garage_id, owner_id, template_id, description, imputation, custom_garage_name, amount, expense_type, expense_date, created_at, created_by').in('garage_id', garageIds).gte('expense_date', movementsSince).order('expense_date', { ascending: false })), 'Egresos'),
+                trackProgress(retry(() => supabase.from('partial_closes').select('*').eq('movement_type', 'expense').select('id, garage_id, owner_id, template_id, description, imputation, custom_garage_name, amount, expense_type, expense_date, created_at, created_by').in('garage_id', garageIds).gte('expense_date', movementsSince).order('expense_date', { ascending: false })), 'Egresos'),
                 trackProgress(fetchMovements(), 'Movimientos'),
                 trackProgress(fetchEmployees(), 'Operadores'),
                 trackProgress(fetchCustomers(), 'Clientes')
@@ -225,7 +225,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
                 vehicles: vehiclesData || [],
                 stays: (activeStaysData || []) as Stay[],
                 allStays: (allStaysData || []) as Stay[],
-                expenses: (expensesData || []) as Expense[],
+                expensePartialCloses: (expensesData || []) as PartialClose[],
                 movements: movementsData || [],
                 employees: employeesData || [],
                 customers: customersData || [],
@@ -264,7 +264,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
 
             // Fetch historical expenses
             const historicalExpensesData = await retry(() => supabase
-                .from('expenses')
+                .from('partial_closes').select('*').eq('movement_type', 'expense')
                 .select('id, garage_id, owner_id, template_id, description, amount, expense_type, expense_date, created_at, created_by')
                 .in('garage_id', garageIds)
                 .gte('expense_date', firstDayOfYear)
@@ -315,7 +315,7 @@ export const useCashFlowStore = create<CashFlowState>((set, get) => ({
             };
 
             set({
-                expenses: uniqueById([...current.expenses, ...((historicalExpensesData || []) as Expense[])]),
+                expensePartialCloses: uniqueById([...current.expensePartialCloses, ...((historicalExpensesData || []) as PartialClose[])]),
                 allStays: uniqueById([...current.allStays, ...((historicalStaysData || []) as Stay[])]),
                 movements: uniqueById([...current.movements, ...historicalMovements]),
                 loadingTier2: false

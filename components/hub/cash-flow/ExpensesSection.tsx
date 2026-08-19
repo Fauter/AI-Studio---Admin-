@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Plus, X, CheckCircle2, BadgeDollarSign, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ReceiptText, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { Garage } from '../../../types';
-import { cn, formatCurrency, Expense } from './CashFlowShared';
+import { cn, formatCurrency, getExpenseDisplayText, PartialClose} from './CashFlowShared';
 import { formatDateTime24h } from '../../../lib/dateFormatters';
 
 // ─────────────────────────────────────────────────────────────
@@ -27,10 +27,10 @@ function buildExpenseDetail(imputation: string | null | undefined, observations:
 
 interface ExpensesSectionProps {
     garages: Garage[];
-    expenses: Expense[];
+    expenses: PartialClose[];
     selectedGarageId: string;
     profile: { id: string; full_name?: string | null; email?: string | null } | null;
-    onExpenseCreated: (expense: Expense) => void;
+    onPartialCloseCreated: (expense: PartialClose) => void;
     getGarageName: (id: string | null, customName?: string | null) => string;
     GarageFilter?: React.ReactNode;
 }
@@ -44,7 +44,7 @@ export default function ExpensesSection({
     expenses,
     selectedGarageId,
     profile,
-    onExpenseCreated,
+    onPartialCloseCreated,
     getGarageName,
 }: ExpensesSectionProps) {
     // ── Modal state ──
@@ -98,9 +98,9 @@ export default function ExpensesSection({
         if (searchQuery.trim() !== '') {
             const q = searchQuery.toLowerCase();
             filtered = filtered.filter(e =>
-                (e.imputation || '').toLowerCase().includes(q) ||
-                (e.description || '').toLowerCase().includes(q) ||
-                getGarageName(e.garage_id, e.custom_garage_name).toLowerCase().includes(q)
+                (e.recipient_name || '').toLowerCase().includes(q) ||
+                (e.notes || '').toLowerCase().includes(q) ||
+                getGarageName(e.garage_id, e.notes).toLowerCase().includes(q)
             );
         }
 
@@ -111,14 +111,14 @@ export default function ExpensesSection({
         filtered.sort((a, b) => {
             let valA: any, valB: any;
             if (sortConfig.key === 'date') {
-                valA = new Date(a.expense_date).getTime();
-                valB = new Date(b.expense_date).getTime();
+                valA = new Date(a.created_at).getTime();
+                valB = new Date(b.created_at).getTime();
             } else if (sortConfig.key === 'garage') {
-                valA = getGarageName(a.garage_id, a.custom_garage_name).toLowerCase();
-                valB = getGarageName(b.garage_id, b.custom_garage_name).toLowerCase();
+                valA = getGarageName(a.garage_id, a.notes).toLowerCase();
+                valB = getGarageName(b.garage_id, b.notes).toLowerCase();
             } else if (sortConfig.key === 'imputation') {
-                valA = (a.imputation || '').toLowerCase();
-                valB = (b.imputation || '').toLowerCase();
+                valA = (a.recipient_name || '').toLowerCase();
+                valB = (b.recipient_name || '').toLowerCase();
             } else if (sortConfig.key === 'amount') {
                 valA = a.amount;
                 valB = b.amount;
@@ -231,21 +231,8 @@ export default function ExpensesSection({
 
             if (error) throw error;
             if (data) {
-                const mappedExpense: Expense = {
-                    id: data.id,
-                    garage_id: data.garage_id,
-                    owner_id: '',
-                    template_id: undefined,
-                    description: data.notes || '',
-                    imputation: data.recipient_name || '',
-                    custom_garage_name: '',
-                    amount: data.amount,
-                    expense_type: data.movement_type,
-                    expense_date: data.timestamp || data.created_at,
-                    created_at: data.created_at,
-                    created_by: data.operator
-                };
-                onExpenseCreated(mappedExpense);
+                const mappedExpense: PartialClose = { id: data.id, garage_id: data.garage_id, operator: data.operator, created_at: data.timestamp || data.created_at, amount: data.amount, movement_type: data.movement_type || 'expense', notes: data.notes || null, recipient_name: data.recipient_name || null, is_withdrawn: false, withdrawn_by_name: null };
+                onPartialCloseCreated(mappedExpense);
                 showSuccess('Egreso registrado correctamente');
                 resetForm();
                 setIsModalOpen(false);
@@ -387,16 +374,16 @@ export default function ExpensesSection({
                                                         </span>
                                                         <span className="text-slate-300 font-light">|</span>
                                                         <span className="font-bold text-slate-800 text-sm truncate">
-                                                            {buildExpenseDetail(expense.imputation, expense.description)}
+                                                            {buildExpenseDetail(expense.recipient_name, expense.notes)}
                                                         </span>
                                                     </div>
                                                     {/* Renglón 2 */}
                                                     <div className="flex flex-col text-xs space-y-1">
                                                         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                                            {getGarageName(expense.garage_id, expense.custom_garage_name)}
+                                                            {getGarageName(expense.garage_id, expense.notes)}
                                                         </span>
                                                         <span className="text-slate-400">
-                                                            {formatDateTime24h(expense.expense_date)}
+                                                            {formatDateTime24h(expense.created_at)}
                                                         </span>
                                                     </div>
                                                 </td>
@@ -404,19 +391,19 @@ export default function ExpensesSection({
                                                 {/* Desktop Cells */}
                                                 <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="text-xs font-mono font-medium text-slate-500">
-                                                        {formatDateTime24h(expense.expense_date)}
+                                                        {formatDateTime24h(expense.created_at)}
                                                     </span>
                                                 </td>
                                                 <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="text-xs font-semibold text-slate-600">
-                                                        {getGarageName(expense.garage_id, expense.custom_garage_name)}
+                                                        {getGarageName(expense.garage_id, expense.notes)}
                                                     </span>
                                                 </td>
                                                 <td className="hidden md:table-cell px-4 h-[52px]">
                                                     <span className="inline-flex items-center gap-1.5 text-sm text-slate-700">
                                                         <ClipboardList className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                                         <span className="truncate max-w-[350px]">
-                                                            {buildExpenseDetail(expense.imputation, expense.description)}
+                                                            {buildExpenseDetail(expense.recipient_name, expense.notes)}
                                                         </span>
                                                     </span>
                                                 </td>
