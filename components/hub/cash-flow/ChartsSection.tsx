@@ -198,7 +198,7 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
     const dataMax = Math.max(actualDataMax, 1);
     const currentHour = new Date().getHours();
     
-    const pad = { top: 24, right: 16, bottom: 30, left: 24 };
+    const pad = { top: 24, right: 24, bottom: 30, left: 28 };
     const chartH = H - pad.top - pad.bottom;
     const barW = (W - pad.left - pad.right) / Math.max(data.length, 1);
     const gap = data.length > 30 ? Math.max(0.5, barW * 0.05) : barW * 0.1;
@@ -221,7 +221,12 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
         VISIBLE_HOURS.forEach(h => visibleXIndices.add(h));
     }
     
-    const evenStep = dataMax <= 8 ? 2 : dataMax <= 20 ? 5 : Math.ceil(dataMax / 5 / 5) * 5;
+    let evenStep = 1;
+    if (dataMax <= 2) evenStep = 0.5;
+    else if (dataMax <= 8) evenStep = 2;
+    else if (dataMax <= 20) evenStep = 5;
+    else evenStep = Math.ceil(dataMax / 5 / 5) * 5;
+
     const yTicks: number[] = [];
     for (let t = evenStep; t <= dataMax + evenStep; t += evenStep) { yTicks.push(t); if (yTicks.length >= 5) break; }
     
@@ -253,8 +258,36 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
             dateText = `${d} de ${months[parseInt(m, 10) - 1] || m}`;
         }
         
-        const metricName = peakMode === "occupancy" ? "Ocupación" : peakMode === "entries" ? "Entradas" : "Salidas";
-        const vehiclesText = val === 1 ? "1 vehículo" : `${val} vehículos`;
+        const isHourly = peakPeriod === "today" || historicalChartView === "hourly-profile";
+        const formatVal = (v: number) => (Number.isInteger(v) ? v.toString() : v.toFixed(1).replace('.0', '')).replace('.', ',');
+        const valStr = formatVal(val);
+        
+        let metricName = "";
+        let vehiclesText = "";
+        
+        if (isHourly) {
+            if (peakMode === "occupancy") {
+                metricName = "Ocupación promedio";
+                vehiclesText = `${valStr} vehículos`;
+            } else if (peakMode === "entries") {
+                metricName = "Entradas promedio";
+                vehiclesText = `${valStr} por día`;
+            } else {
+                metricName = "Salidas promedio";
+                vehiclesText = `${valStr} por día`;
+            }
+        } else {
+            if (peakMode === "occupancy") {
+                metricName = "Pico de ocupación";
+                vehiclesText = val === 1 ? "1 vehículo" : `${val} vehículos`;
+            } else if (peakMode === "entries") {
+                metricName = "Entradas";
+                vehiclesText = val === 1 ? "1 vehículo" : `${val} vehículos`;
+            } else {
+                metricName = "Salidas";
+                vehiclesText = val === 1 ? "1 vehículo" : `${val} vehículos`;
+            }
+        }
         
         tooltipNode = (
             <div className="absolute z-10 pointer-events-none transition-all duration-200"
@@ -314,7 +347,7 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
                         <g key={`yt-${i}`} className="pointer-events-none">
                             <line x1={pad.left} x2={W - pad.right} y1={yPos} y2={yPos} stroke="#e2e8f0" strokeWidth="0.5" />
                             <text x={pad.left - 6} y={yPos + 3.5} textAnchor="end" fontSize="10" fill="#94a3b8" fontFamily="monospace">
-                                {tick}
+                                {tick.toString().replace('.', ',')}
                             </text>
                         </g>
                     );
@@ -357,13 +390,13 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
                                 
                             {isVisibleLabel && (
                                 <text x={x + w / 2} y={H - 8} textAnchor="middle" fontSize="11" fill={isHovered ? "#334155" : "#64748b"} fontWeight={isHovered ? "bold" : "normal"} fontFamily="monospace" className="pointer-events-none transition-colors">
-                                    {labels ? labels[hour] : hour.toString().padStart(2, "0")}
+                                    {labels ? labels[hour] : `${hour.toString().padStart(2, "0")}hs`}
                                 </text>
                             )}
                             
                             {showNumLabel && (
                                 <text x={x + w / 2} y={y - 6} textAnchor="middle" fontSize={isPeakHour ? (barW < 12 ? "9" : "10") : "9"} fill={isPeakHour ? peakLabelColor : labelColor} fontWeight={isPeakHour ? "bold" : "600"} fontFamily="monospace" className="pointer-events-none">
-                                    {isPeakHour && barW > 14 ? "★ " : ""}{val}
+                                    {isPeakHour && barW > 14 ? "★ " : ""}{(Number.isInteger(val) ? val.toString() : val.toFixed(1).replace('.0', '')).replace('.', ',')}
                                 </text>
                             )}
                         </g>
@@ -376,6 +409,19 @@ function PeakHoursBarChart({ data, peakMode, labels, peakPeriod, historicalChart
 }
 
 export default function ChartsSection({ revenueChartData, peakHoursData, peakHoursLabels, peakMode, setPeakMode, peakPeriod, setPeakPeriod, historicalChartView, setHistoricalChartView, loadingPeakStays }: ChartsSectionProps) {
+    const getPeakContext = () => {
+        const isHourly = peakPeriod === 'today' || historicalChartView === 'hourly-profile';
+        if (isHourly) {
+            if (peakMode === 'occupancy') return "Promedio de vehículos simultáneos por franja horaria.";
+            if (peakMode === 'entries') return "Promedio diario de entradas por hora.";
+            return "Promedio diario de salidas por hora.";
+        } else {
+            if (peakMode === 'occupancy') return "Pico máximo de vehículos simultáneos por día.";
+            if (peakMode === 'entries') return "Total de entradas registradas por día.";
+            return "Total de salidas registradas por día.";
+        }
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden flex flex-col">
@@ -395,16 +441,22 @@ export default function ChartsSection({ revenueChartData, peakHoursData, peakHou
             </div>
             
             <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                <div className="px-5 pt-5 pb-2 flex items-center justify-between overflow-x-auto no-scrollbar shrink-0">
-                    <div className="flex items-center gap-2 mr-2 shrink-0">
-                        <BarChart3 className="h-4 w-4 text-indigo-500" />
-                        <h3 className="text-sm font-bold text-slate-700 whitespace-nowrap">Horas Pico</h3>
+                <div className="px-4 sm:px-4 lg:px-5 pt-4 sm:pt-4 lg:pt-5 pb-2 flex flex-wrap sm:flex-nowrap items-start sm:items-center justify-between gap-y-3 gap-x-3 shrink-0">
+                    <div className="flex flex-col flex-1 min-w-0 mr-1 sm:mr-2">
+                        <div className="flex items-center gap-2">
+                            <BarChart3 className="h-4 w-4 text-indigo-500 shrink-0" />
+                            <h3 className="text-sm font-bold text-slate-700 whitespace-nowrap truncate">Horas Pico</h3>
+                        </div>
+                        <span className="text-[9px] text-slate-400 mt-0.5 hidden sm:block truncate w-full" title={getPeakContext()}>
+                            {getPeakContext()}
+                        </span>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 shrink-0">
                         <select value={peakPeriod} onChange={(e) => {
                             const p = e.target.value as PeakPeriod;
                             setPeakPeriod(p);
-                            if (p === 'today') setHistoricalChartView('historical');
+                            // Always default to hourly-profile when changing period (including today)
+                            setHistoricalChartView('hourly-profile');
                         }} className="text-[10px] py-1 pl-2 pr-6 border-slate-200 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 h-[26px]">
                             <option value="today">Hoy</option>
                             <option value="7_days">Últimos 7 días</option>
@@ -422,7 +474,7 @@ export default function ChartsSection({ revenueChartData, peakHoursData, peakHou
                                         key={mode}
                                         onClick={() => setPeakMode(mode)}
                                         className={cn(
-                                            "px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all duration-200 whitespace-nowrap",
+                                            "px-2 py-1 text-[10px] font-semibold rounded-md transition-all duration-200 whitespace-nowrap",
                                             isSelected 
                                                 ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50" 
                                                 : "text-slate-500 hover:text-slate-700"
@@ -433,9 +485,20 @@ export default function ChartsSection({ revenueChartData, peakHoursData, peakHou
                                 );
                             })}
                         </div>
-                        <label className={cn("flex items-center gap-1.5 text-[10px] select-none h-[26px] px-2 rounded-md transition-colors whitespace-nowrap shrink-0", peakPeriod === 'today' ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-slate-50 border border-slate-200")}>
-                            <input type="checkbox" disabled={peakPeriod === 'today'} checked={historicalChartView === 'hourly-profile'} onChange={(e) => setHistoricalChartView(e.target.checked ? 'hourly-profile' : 'historical')} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer" />
-                            <span className="font-semibold text-slate-600">Patrón Horario</span>
+                        <label 
+                            className={cn(
+                                "flex items-center gap-1.5 text-[10px] select-none h-[26px] px-2 rounded-md transition-colors whitespace-nowrap shrink-0 border border-slate-200", 
+                                peakPeriod === 'today' ? "opacity-50 cursor-not-allowed bg-slate-50" : "cursor-pointer hover:bg-slate-50"
+                            )}
+                        >
+                            <input 
+                                type="checkbox" 
+                                disabled={peakPeriod === 'today'} 
+                                checked={historicalChartView === 'historical'} 
+                                onChange={(e) => setHistoricalChartView(e.target.checked ? 'historical' : 'hourly-profile')} 
+                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer disabled:cursor-not-allowed" 
+                            />
+                            <span className="font-semibold text-slate-600">Evolución</span>
                         </label>
                     </div>
                 </div>

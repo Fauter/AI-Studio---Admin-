@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, TrendingUp, Calendar, Loader2 } from 'lucide-react';
 import { cn, formatCurrency, VariationBadge } from '../CashFlowShared';
+import { useBodyScrollLock } from '../../../../hooks/useBodyScrollLock';
 
 interface HistoryModalProps {
     isOpen: boolean;
@@ -10,6 +11,8 @@ interface HistoryModalProps {
 }
 
 export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading }: HistoryModalProps) {
+    useBodyScrollLock(isOpen);
+
     if (!isOpen) return null;
 
     return (
@@ -18,13 +21,16 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
             <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
             {/* Modal */}
             <div className="relative bg-white rounded-2xl shadow-xl w-[95%] md:w-full md:max-w-lg max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
-                onClick={e => e.stopPropagation()}>
+                onClick={e => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="history-modal-title">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 md:px-6 md:py-4 border-b border-slate-100">
                     <div className="flex items-center gap-2.5">
                         <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600"><TrendingUp className="h-4 w-4" /></div>
                         <div>
-                            <h3 className="text-sm font-bold text-slate-800">Historial de Facturación</h3>
+                            <h3 id="history-modal-title" className="text-sm font-bold text-slate-800">Historial de Facturación</h3>
                             <p className="text-[10px] text-slate-400">Desglose mensual de ingresos</p>
                         </div>
                     </div>
@@ -34,7 +40,7 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
                     </button>
                 </div>
                 {/* Content */}
-                <div className="overflow-auto flex-1 p-4 md:px-6 md:py-3">
+                <div className="overflow-y-auto overscroll-contain flex-1 p-4 md:px-6 md:py-3">
                     {loading ? (
                         <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-3">
                             <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
@@ -50,7 +56,7 @@ export default function HistoryModal({ isOpen, onClose, monthlyHistory, loading 
                             {monthlyHistory.map((entry, i) => (
                                 <div key={i} className={cn(
                                     "flex items-center justify-between py-3.5 gap-4",
-                                    i === 0 && "bg-indigo-50/40 -mx-6 px-6 rounded-xl"
+                                    i === 0 && "bg-indigo-50/40 -mx-4 px-4 md:-mx-6 md:px-6 rounded-xl"
                                 )}>
                                     <div className="flex items-center gap-3 min-w-0">
                                         <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center text-xs font-bold",

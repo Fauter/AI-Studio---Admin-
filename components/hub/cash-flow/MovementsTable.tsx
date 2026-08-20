@@ -1,5 +1,5 @@
-import React from 'react';
-import { List, Filter, ChevronUp, ChevronDown, X, Inbox, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { List, Filter, ChevronUp, ChevronDown, X, Inbox, ArrowUpRight, ArrowDownRight, ArrowUpDown, ArrowDown, ArrowUp } from 'lucide-react';
 import { cn, formatCurrency, getAmountColor, formatDate, Movement, Stay, UnifiedTransaction } from './CashFlowShared';
 
 interface MovementsTableProps {
@@ -17,6 +17,8 @@ interface MovementsTableProps {
     GarageFilter: React.ReactNode;
 }
 
+type SortMode = 'default' | 'desc' | 'asc';
+
 export default function MovementsTable({
     unifiedTransactions,
     totalCaja,
@@ -31,9 +33,35 @@ export default function MovementsTable({
     getGarageName,
     GarageFilter
 }: MovementsTableProps) {
+    const [sortMode, setSortMode] = useState<SortMode>('default');
+
+    const sortedTransactions = useMemo(() => {
+        if (sortMode === 'default') return unifiedTransactions;
+        
+        return [...unifiedTransactions].sort((a, b) => {
+            const valA = a.source === 'expense' ? -Math.abs(a.amount) : a.amount;
+            const valB = b.source === 'expense' ? -Math.abs(b.amount) : b.amount;
+            
+            if (sortMode === 'desc') {
+                if (valA !== valB) return valB - valA;
+            } else {
+                if (valA !== valB) return valA - valB;
+            }
+            
+            // Stable sort for ties preserving the default order (chronological)
+            return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+        });
+    }, [unifiedTransactions, sortMode]);
+
+    const handleSortMonto = () => {
+        setSortMode(prev => prev === 'default' ? 'desc' : prev === 'desc' ? 'asc' : 'default');
+    };
+
+    const SortIcon = sortMode === 'default' ? ArrowUpDown : sortMode === 'desc' ? ArrowDown : ArrowUp;
+
     return (
         <div className="animate-in fade-in duration-300 bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-5 pt-5 pb-3 flex items-center justify-between border-b border-slate-100">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between border-b border-slate-100 relative z-20 bg-white">
                 <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-lg bg-slate-100 text-slate-600"><List className="h-4 w-4" /></div>
                     <div>
@@ -58,7 +86,7 @@ export default function MovementsTable({
 
             {/* Collapsible Filters */}
             {filtersOpen && (
-                <div className="px-5 py-4 bg-slate-50/80 border-b border-slate-100 animate-in slide-in-from-top-2 duration-200">
+                <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 animate-in slide-in-from-top-2 duration-200 relative z-20">
                     <div className="flex items-center justify-between mb-3">
                         <h4 className="text-xs font-semibold text-slate-600 flex items-center gap-1.5"><Filter className="h-3.5 w-3.5 text-indigo-500" /> Filtros Avanzados</h4>
                         {Object.values(filters).some(v => v !== '') && (
@@ -130,26 +158,35 @@ export default function MovementsTable({
             )}
 
             {/* Movements Table */}
-            <div className="h-[500px] overflow-auto">
-                <table className="w-full text-sm text-left">
-                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50/80 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-100 hidden md:table-header-group">
+            <div className="h-[500px] overflow-auto relative">
+                <table className="w-full text-sm text-left border-separate border-spacing-0">
+                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 sticky top-0 z-10 hidden md:table-header-group">
                         <tr>
-                            <th className="px-4 py-3 font-semibold">Garaje</th>
-                            <th className="px-4 py-3 font-semibold">Patente</th>
-                            <th className="px-4 py-3 font-semibold">Hora</th>
-                            <th className="px-4 py-3 font-semibold">Descripción</th>
-                            <th className="px-4 py-3 font-semibold">Operador</th>
-                            <th className="px-4 py-3 font-semibold">Método</th>
-                            <th className="px-4 py-3 font-semibold text-right">Monto</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Garaje</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Patente</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Hora</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Descripción</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Operador</th>
+                            <th className="px-4 py-3 font-semibold border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9]">Método</th>
+                            <th 
+                                className="px-4 py-3 font-semibold text-right border-b border-slate-100 shadow-[0_1px_0_0_#f1f5f9] cursor-pointer hover:bg-slate-100/80 transition-colors group"
+                                onClick={handleSortMonto}
+                                title="Ordenar por monto"
+                            >
+                                <div className="flex items-center justify-end gap-1.5">
+                                    <span>Monto</span>
+                                    <SortIcon className={cn("h-3 w-3", sortMode === 'default' ? "opacity-40 group-hover:opacity-60" : "text-indigo-500")} />
+                                </div>
+                            </th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 block md:table-row-group">
-                        {unifiedTransactions.length === 0 ? (
-                            <tr><td colSpan={8} className="p-12 text-center text-slate-400 text-sm">
+                    <tbody className="block md:table-row-group">
+                        {sortedTransactions.length === 0 ? (
+                            <tr><td colSpan={7} className="p-12 text-center text-slate-400 text-sm">
                                 <div className="flex flex-col items-center gap-2"><Inbox className="h-8 w-8 opacity-20" /><p>No hay movimientos en este período.</p></div>
                             </td></tr>
                         ) : (
-                            unifiedTransactions.slice(0, 500).map(txn => (
+                            sortedTransactions.slice(0, 500).map(txn => (
                                 <tr key={txn.id} className={cn("hover:bg-indigo-50/40 transition-colors cursor-default flex flex-col md:table-row py-3 px-4 md:py-0 md:px-0", txn.source === 'expense' && "bg-red-50/30")}>
                                     {/* MOBILE ONLY COMPOSITE ROW */}
                                     <td className="md:hidden flex flex-col w-full">
@@ -187,8 +224,8 @@ export default function MovementsTable({
                                     </td>
 
                                     {/* DESKTOP CELLS (Hidden on mobile) */}
-                                    <td className="hidden md:table-cell px-4 py-3.5"><span className="font-medium text-slate-600 text-xs">{getGarageName(txn.garage_id)}</span></td>
-                                    <td className="hidden md:table-cell px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5 border-b border-slate-100/50"><span className="font-medium text-slate-600 text-xs">{getGarageName(txn.garage_id)}</span></td>
+                                    <td className="hidden md:table-cell px-4 py-3.5 border-b border-slate-100/50">
                                         {txn.source === 'expense' ? (
                                             <div className="flex flex-col">
                                                 <span className="font-bold font-mono text-slate-400 tracking-wide">N/A</span>
@@ -203,7 +240,7 @@ export default function MovementsTable({
                                             </div>
                                         )}
                                     </td>
-                                    <td className="hidden md:table-cell px-4 py-3.5 text-left text-xs font-medium">
+                                    <td className="hidden md:table-cell px-4 py-3.5 text-left text-xs font-medium border-b border-slate-100/50">
                                         {txn.source === 'movement' && txn.type === 'CobroEstadia' && txn.related_entity_id && staysLookup[txn.related_entity_id] ? (
                                             <div className="flex flex-col items-start gap-0.5">
                                                 <div className="flex items-center gap-1 text-slate-500 text-[10px]">
@@ -219,22 +256,22 @@ export default function MovementsTable({
                                             <span className="text-slate-500">{formatDate(txn.timestamp)}</span>
                                         )}
                                     </td>
-                                    <td className="hidden md:table-cell px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5 border-b border-slate-100/50">
                                         <div className="flex flex-col gap-1">
                                             <span className="text-xs text-slate-600">{txn.description || '---'}</span>
                                         </div>
                                     </td>
-                                    <td className="hidden md:table-cell px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5 border-b border-slate-100/50">
                                         <span className={cn("text-xs font-medium", (!txn.operator || txn.operator === 'Sistema') ? "text-slate-400" : "text-slate-600")}>
                                             {txn.operator || 'Sistema'}
                                         </span>
                                     </td>
-                                    <td className="hidden md:table-cell px-4 py-3.5">
+                                    <td className="hidden md:table-cell px-4 py-3.5 border-b border-slate-100/50">
                                         <span className="text-xs text-slate-500 font-medium font-mono">
                                             {txn.source === 'expense' ? '---' : (txn.payment_method?.toUpperCase() || '---')}
                                         </span>
                                     </td>
-                                    <td className={cn("hidden md:table-cell px-4 py-3.5 text-right font-bold font-mono",
+                                    <td className={cn("hidden md:table-cell px-4 py-3.5 text-right font-bold font-mono border-b border-slate-100/50",
                                         txn.source === 'expense' ? 'text-red-600' : getAmountColor(txn.type)
                                     )}>
                                         {txn.source === 'expense' ? `-${formatCurrency(txn.amount)}` : formatCurrency(txn.amount)}

@@ -222,9 +222,14 @@ function aggregatePeakStays(
         
         stays.forEach(stay => {
             if (!stay.entry_time) return;
-            const entryDate = new Date(stay.entry_time);
+            const safeEntry = stay.entry_time.includes('T') ? stay.entry_time : stay.entry_time.replace(' ', 'T');
+            const entryDate = new Date(safeEntry);
             const entryMs = entryDate.getTime();
-            const exitDate = (stay.active || !stay.exit_time) ? now : new Date(stay.exit_time);
+            let exitDate = now;
+            if (!stay.active && stay.exit_time) {
+                const safeExit = stay.exit_time.includes('T') ? stay.exit_time : stay.exit_time.replace(' ', 'T');
+                exitDate = new Date(safeExit);
+            }
             const exitMs = exitDate.getTime();
             
             if (peakMode === 'occupancy') {
@@ -271,8 +276,13 @@ function aggregatePeakStays(
                 const dayHistogram = new Array(24).fill(0);
                 stays.forEach(stay => {
                     if (!stay.entry_time) return;
-                    const entryMs = new Date(stay.entry_time).getTime();
-                    const exitMs = (stay.active || !stay.exit_time) ? now.getTime() : new Date(stay.exit_time).getTime();
+                    const safeEntry = stay.entry_time.includes('T') ? stay.entry_time : stay.entry_time.replace(' ', 'T');
+                    const entryMs = new Date(safeEntry).getTime();
+                    let exitMs = now.getTime();
+                    if (!stay.active && stay.exit_time) {
+                        const safeExit = stay.exit_time.includes('T') ? stay.exit_time : stay.exit_time.replace(' ', 'T');
+                        exitMs = new Date(safeExit).getTime();
+                    }
                     
                     if (exitMs < b.startMs || entryMs >= b.endMs) return;
                     
@@ -290,7 +300,8 @@ function aggregatePeakStays(
         } else if (peakMode === 'entries') {
             stays.forEach(stay => {
                 if (!stay.entry_time) return;
-                const entryMs = new Date(stay.entry_time).getTime();
+                const safeEntry = stay.entry_time.includes('T') ? stay.entry_time : stay.entry_time.replace(' ', 'T');
+                const entryMs = new Date(safeEntry).getTime();
                 for (let i = 0; i < days; i++) {
                     if (entryMs >= buckets[i].startMs && entryMs < buckets[i].endMs) {
                         data[i]++;
@@ -301,7 +312,8 @@ function aggregatePeakStays(
         } else if (peakMode === 'exits') {
             stays.forEach(stay => {
                 if (stay.active || !stay.exit_time) return;
-                const exitMs = new Date(stay.exit_time).getTime();
+                const safeExit = stay.exit_time.includes('T') ? stay.exit_time : stay.exit_time.replace(' ', 'T');
+                const exitMs = new Date(safeExit).getTime();
                 for (let i = 0; i < days; i++) {
                     if (exitMs >= buckets[i].startMs && exitMs < buckets[i].endMs) {
                         data[i]++;
@@ -315,19 +327,28 @@ function aggregatePeakStays(
 
     } else {
         const histogram = new Array(24).fill(0);
+        const todayStartMs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+        const currentHour = now.getHours();
         
         if (peakMode === 'occupancy') {
             const hourSums = new Array(24).fill(0);
+            const hourDaysCount = new Array(24).fill(0);
             
             for (let i = 0; i < days; i++) {
                 const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i, 0, 0, 0, 0);
                 const nextD = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+                const isToday = d.getTime() === todayStartMs;
                 
                 const dayHistogram = new Array(24).fill(0);
                 stays.forEach(stay => {
                     if (!stay.entry_time) return;
-                    const entryMs = new Date(stay.entry_time).getTime();
-                    const exitMs = (stay.active || !stay.exit_time) ? now.getTime() : new Date(stay.exit_time).getTime();
+                    const safeEntry = stay.entry_time.includes('T') ? stay.entry_time : stay.entry_time.replace(' ', 'T');
+                    const entryMs = new Date(safeEntry).getTime();
+                    let exitMs = now.getTime();
+                    if (!stay.active && stay.exit_time) {
+                        const safeExit = stay.exit_time.includes('T') ? stay.exit_time : stay.exit_time.replace(' ', 'T');
+                        exitMs = new Date(safeExit).getTime();
+                    }
                     
                     if (exitMs < d.getTime() || entryMs >= nextD.getTime()) return;
                     
@@ -342,35 +363,71 @@ function aggregatePeakStays(
                 });
                 
                 for (let h = 0; h < 24; h++) {
+                    if (isToday && h >= currentHour) continue; // Skip incomplete/future hours
                     hourSums[h] += dayHistogram[h];
+                    hourDaysCount[h]++;
                 }
             }
             
             for (let h = 0; h < 24; h++) {
-                histogram[h] = Math.round(hourSums[h] / days);
+                histogram[h] = hourDaysCount[h] > 0 ? hourSums[h] / hourDaysCount[h] : 0;
             }
             
         } else if (peakMode === 'entries') {
-            stays.forEach(stay => {
-                if (!stay.entry_time) return;
-                const entryMs = new Date(stay.entry_time).getTime();
-                if (entryMs >= startDate.getTime() && entryMs < now.getTime()) {
-                    histogram[new Date(entryMs).getHours()]++;
+            const hourSums = new Array(24).fill(0);
+            const hourDaysCount = new Array(24).fill(0);
+            
+            for (let i = 0; i < days; i++) {
+                const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i, 0, 0, 0, 0);
+                const nextD = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+                const isToday = d.getTime() === todayStartMs;
+                
+                const dayHistogram = new Array(24).fill(0);
+                stays.forEach(stay => {
+                    if (!stay.entry_time) return;
+                    const safeEntry = stay.entry_time.includes('T') ? stay.entry_time : stay.entry_time.replace(' ', 'T');
+                    const entryMs = new Date(safeEntry).getTime();
+                    if (entryMs >= d.getTime() && entryMs < nextD.getTime()) {
+                        dayHistogram[new Date(entryMs).getHours()]++;
+                    }
+                });
+                
+                for (let h = 0; h < 24; h++) {
+                    if (isToday && h >= currentHour) continue; // Skip incomplete/future hours
+                    hourSums[h] += dayHistogram[h];
+                    hourDaysCount[h]++;
                 }
-            });
+            }
             for (let h = 0; h < 24; h++) {
-                histogram[h] = Math.round(histogram[h] / days);
+                histogram[h] = hourDaysCount[h] > 0 ? hourSums[h] / hourDaysCount[h] : 0;
             }
         } else if (peakMode === 'exits') {
-            stays.forEach(stay => {
-                if (stay.active || !stay.exit_time) return;
-                const exitMs = new Date(stay.exit_time).getTime();
-                if (exitMs >= startDate.getTime() && exitMs < now.getTime()) {
-                    histogram[new Date(exitMs).getHours()]++;
+            const hourSums = new Array(24).fill(0);
+            const hourDaysCount = new Array(24).fill(0);
+            
+            for (let i = 0; i < days; i++) {
+                const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i, 0, 0, 0, 0);
+                const nextD = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+                const isToday = d.getTime() === todayStartMs;
+                
+                const dayHistogram = new Array(24).fill(0);
+                stays.forEach(stay => {
+                    if (stay.active || !stay.exit_time) return;
+                    const safeExit = stay.exit_time.includes('T') ? stay.exit_time : stay.exit_time.replace(' ', 'T');
+                    const exitMs = new Date(safeExit).getTime();
+                    if (exitMs >= d.getTime() && exitMs < nextD.getTime()) {
+                        dayHistogram[new Date(exitMs).getHours()]++;
+                    }
+                });
+                
+                for (let h = 0; h < 24; h++) {
+                    if (isToday && h >= currentHour) continue; // Skip incomplete/future hours
+                    hourSums[h] += dayHistogram[h];
+                    hourDaysCount[h]++;
                 }
-            });
+            }
             for (let h = 0; h < 24; h++) {
-                histogram[h] = Math.round(histogram[h] / days);
+                histogram[h] = hourDaysCount[h] > 0 ? hourSums[h] / hourDaysCount[h] : 0;
             }
         }
         

@@ -667,16 +667,20 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         });
     }, [garages, movements, stays, buildingLevels, cocheras, debts, vehicles, clientesConCochera, storeExpenses]);
 
+    const [activityGarageFilter, setActivityGarageFilter] = useState<string>('all');
+    const [expensesGarageFilter, setExpensesGarageFilter] = useState<string>('all');
+
     // §4f. Filtered Movements
     const filteredMovements = useMemo(() => {
-        let result = gMovements;
+        let result = activityGarageFilter === 'all' ? movements : movements.filter(m => m.garage_id === activityGarageFilter);
         if (filters.operatorId) {
             const empName = employees.find(e => e.id === filters.operatorId)?.full_name;
             if (empName) result = result.filter(m => m.operator === empName);
         }
         if (filters.paymentMethod) result = result.filter(m => m.payment_method?.toUpperCase().includes(filters.paymentMethod.toUpperCase()));
         if (filters.tariffType) {
-            if (filters.tariffType === 'Hora') result = result.filter(m => m.type === 'CobroEstadia');
+            if (filters.tariffType === 'Egreso') return [];
+            else if (filters.tariffType === 'Hora') result = result.filter(m => m.type === 'CobroEstadia');
             else if (filters.tariffType === 'Abono') result = result.filter(m => (m.type as string) === 'CobroAbono');
             else if (filters.tariffType === 'Anticipado') result = result.filter(m => (m.type as string) === 'CobroAnticipado');
         }
@@ -692,14 +696,15 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             if (filters.endDate) { const e = new Date(filters.endDate + 'T23:59:59').getTime(); result = result.filter(m => new Date(m.timestamp).getTime() <= e); }
         }
         return result;
-    }, [gMovements, filters, employees, vehicleTypesMap]);
+    }, [movements, activityGarageFilter, filters, employees, vehicleTypesMap]);
 
     const totalCaja = useMemo(() => filteredMovements.reduce((acc, m) => acc + Number(m.amount || 0), 0), [filteredMovements]);
 
     // §4g. Unified Transactions — merge movements + expenses for Registro de Actividad
     const filteredExpensePartialCloses = useMemo(() => {
-        let result = storeExpenses || [];
-        if (filters.vehicleType || filters.tariffType || filters.paymentMethod) return [];
+        let result = activityGarageFilter === 'all' ? storeExpenses : storeExpenses.filter(e => e.garage_id === activityGarageFilter);
+        if (filters.vehicleType || filters.paymentMethod) return [];
+        if (filters.tariffType && filters.tariffType !== 'Egreso') return [];
         if (filters.operatorId) {
             const empName = employees.find(e => e.id === filters.operatorId)?.full_name;
             if (empName) result = result.filter(e => e.operator === empName);
@@ -710,7 +715,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
             if (filters.endDate) { const eT = new Date(filters.endDate + 'T23:59:59').getTime(); result = result.filter(e => new Date(e.created_at).getTime() <= eT); }
         }
         return result;
-    }, [storeExpenses, filters, employees]);
+    }, [storeExpenses, activityGarageFilter, filters, employees]);
 
     const unifiedTransactions = useMemo<UnifiedTransaction[]>(() => {
         const movementTxns: UnifiedTransaction[] = filteredMovements.map(m => ({
@@ -749,6 +754,17 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
         <div className="relative mb-1 w-full md:w-auto">
             <Filter className="absolute left-2.5 top-[8px] h-3.5 w-3.5 text-slate-400 pointer-events-none" />
             <select value={selectedGarageId} onChange={(e) => setSelectedGarageId(e.target.value)}
+                className="pl-8 pr-4 py-1 text-xs h-[30px] w-full md:w-auto bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
+                <option value="all">Todos los Garajes</option>
+                {garages.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+            </select>
+        </div>
+    );
+
+    const ActivityGarageFilter = () => (
+        <div className="relative mb-1 w-full md:w-auto">
+            <Filter className="absolute left-2.5 top-[8px] h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+            <select value={activityGarageFilter} onChange={(e) => setActivityGarageFilter(e.target.value)}
                 className="pl-8 pr-4 py-1 text-xs h-[30px] w-full md:w-auto bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer">
                 <option value="all">Todos los Garajes</option>
                 {garages.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
@@ -877,7 +893,7 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                         vehicleTypesMap={vehicleTypesMap}
                         staysLookup={staysLookup}
                         getGarageName={getGarageName}
-                        GarageFilter={<GarageFilter />}
+                        GarageFilter={<ActivityGarageFilter />}
                     />
                 )}
 
@@ -885,12 +901,13 @@ export default function CashFlowHub({ garages }: CashFlowHubProps) {
                 {activeSection === 'egresos' && (
                     <ExpensesSection
                         garages={garages}
-                        expenses={gExpenses as any}
+                        expenses={storeExpenses as any}
                         selectedGarageId={selectedGarageId}
                         profile={profile}
                         onPartialCloseCreated={addExpensePartialClose}
                         getGarageName={getGarageName}
-                        GarageFilter={<GarageFilter />}
+                        tableGarageFilter={expensesGarageFilter}
+                        setTableGarageFilter={setExpensesGarageFilter}
                     />
                 )}
             </div>

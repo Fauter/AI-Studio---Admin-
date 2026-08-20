@@ -758,32 +758,32 @@ const GarageSelectorSection = ({ garages, onRefresh }: { garages: Garage[], onRe
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
       <SectionHeader title="Red de Garajes" icon={Building2} iconColor="blue" />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {garages.map((garage) => (
+          <div key={garage.id} onClick={() => navigate(`/${garage.id}/dashboard`)} className="group relative bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-xl hover:ring-2 hover:ring-blue-500/50 transition-all cursor-pointer min-w-0">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="p-3 bg-blue-50 rounded-xl group-hover:bg-blue-600 transition-colors duration-300 shrink-0">
+                <Building2 className="h-8 w-8 text-blue-600 group-hover:text-white" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-lg text-slate-900 leading-tight mb-1 truncate">{garage.name}</h3>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">Activo</span>
+              </div>
+            </div>
+            <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 text-sm text-slate-500">
+              <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-slate-400 shrink-0" /><span className="truncate min-w-0">{garage.address || 'Sin dirección'}</span></div>
+            </div>
+          </div>
+        ))}
+
         {/* Create Card - Visible for OWNER and MANAGER */}
         {canCreateGarage && (
-          <div onClick={() => setViewMode('create')} className="group flex flex-col items-center justify-center min-h-[200px] border-2 border-dashed border-slate-300 rounded-2xl p-6 cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all">
-            <div className="p-4 bg-slate-100 rounded-full group-hover:bg-blue-100 transition-colors mb-4">
+          <div onClick={() => setViewMode('create')} className="group flex flex-col items-center justify-center h-full border-2 border-dashed border-slate-300 rounded-2xl p-6 cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all min-h-[140px]">
+            <div className="p-3 bg-slate-100 rounded-full group-hover:bg-blue-100 transition-colors mb-3">
               <Plus className="h-8 w-8 text-slate-400 group-hover:text-blue-600" />
             </div>
             <h3 className="font-semibold text-slate-600 group-hover:text-blue-700">Registrar Nuevo</h3>
           </div>
         )}
-
-        {garages.map((garage) => (
-          <div key={garage.id} onClick={() => navigate(`/${garage.id}/dashboard`)} className="group relative bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-xl hover:ring-2 hover:ring-blue-500/50 transition-all cursor-pointer">
-            <div className="flex items-start gap-4 mb-4">
-              <div className="p-3 bg-blue-50 rounded-xl group-hover:bg-blue-600 transition-colors duration-300">
-                <Building2 className="h-8 w-8 text-blue-600 group-hover:text-white" />
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-slate-900 leading-tight mb-1">{garage.name}</h3>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">Activo</span>
-              </div>
-            </div>
-            <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 text-sm text-slate-500">
-              <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-slate-400" /><span className="truncate">{garage.address || 'Sin dirección'}</span></div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

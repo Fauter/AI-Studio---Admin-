@@ -553,22 +553,76 @@ export default function CashClosuresPage() {
                                 )}
                                 {computoRows.map(row => (
                                     <tr key={row.id} className="md:hidden block bg-white border border-slate-200 rounded-xl mb-4 p-4 shadow-sm hover:bg-slate-50 transition-colors">
-                                        {/* Mobile view logic omitted for brevity, keeping desktop view accurate */}
-                                        <td className="block space-y-2">
-                                            <div className="flex justify-between items-start border-b border-slate-100 pb-2">
-                                                <div>
-                                                    <div className="font-bold text-slate-800 text-sm">
+                                        <td className="block space-y-3">
+                                            {/* CABECERA */}
+                                            <div className="flex justify-between items-start border-b border-slate-100 pb-2.5">
+                                                <div className="min-w-0 pr-2">
+                                                    <div className="font-bold text-slate-800 text-sm truncate">
                                                         {row.operador || <span className="italic text-slate-400">Sin nombre</span>}
                                                     </div>
                                                     <div className="text-xs text-slate-500 mt-0.5">
                                                         {formatDate(row.fecha)}
                                                     </div>
                                                 </div>
-                                                <div className={`px-2.5 py-1 rounded-lg border font-black text-xs ${row.resultado < 0 ? 'text-red-700 bg-red-50 border-red-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
+                                                <div className={`shrink-0 px-2.5 py-1 rounded-lg border font-black text-xs ${row.resultado < 0 ? 'text-red-700 bg-red-50 border-red-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
                                                     {formatCurrency(row.resultado)}
                                                 </div>
                                             </div>
-                                            {/* Details... */}
+                                            
+                                            {/* FACTURACIÓN Y COBROS */}
+                                            <div>
+                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Facturación</div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Banco</div>
+                                                        <div className="text-sm font-medium text-slate-700 tabular-nums truncate">{formatCurrency(row.facturacionBank)}</div>
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Efectivo</div>
+                                                        <div className="text-sm font-medium text-slate-700 tabular-nums truncate">{formatCurrency(row.cobroEFT)}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* CAJA & PARCIALES (Combinados para ahorrar espacio) */}
+                                            <div className="pt-2 border-t border-slate-100">
+                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Caja y Retiros</div>
+                                                <div className="grid grid-cols-2 gap-2 mb-2">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Abre con</div>
+                                                        <div className="text-sm font-medium text-slate-700 tabular-nums truncate">{formatCurrency(row.abreCajaCon)}</div>
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Deja en caja</div>
+                                                        <div className="text-sm font-medium text-amber-600 tabular-nums truncate">{formatCurrency(row.dejaEnCaja)}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] font-semibold text-slate-600 truncate">Cierre</div>
+                                                        <div className="text-sm font-bold text-slate-800 tabular-nums truncate">{formatCurrency(row.cierreDeCaja)}</div>
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Cierres parciales</div>
+                                                        <div className="text-sm font-medium text-slate-700 tabular-nums truncate">{formatCurrency(row.cierresParciales)}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* CONCILIACIÓN */}
+                                            <div className="pt-2 border-t border-slate-100">
+                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Conciliación</div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Operador</div>
+                                                        <div className="text-sm font-bold text-slate-700 tabular-nums truncate">{formatCurrency(row.totalOperador)}</div>
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="text-[10px] text-slate-500 truncate">Sistema</div>
+                                                        <div className="text-sm font-bold text-slate-700 tabular-nums truncate">{formatCurrency(row.totalSistema)}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

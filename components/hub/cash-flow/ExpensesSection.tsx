@@ -22,7 +22,8 @@ interface ExpensesSectionProps {
     profile: { id: string; full_name?: string | null; email?: string | null } | null;
     onPartialCloseCreated: (expense: PartialClose) => void;
     getGarageName: (id: string | null, customName?: string | null) => string;
-    GarageFilter?: React.ReactNode;
+    tableGarageFilter: string;
+    setTableGarageFilter: React.Dispatch<React.SetStateAction<string>>;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -36,6 +37,8 @@ export default function ExpensesSection({
     profile,
     onPartialCloseCreated,
     getGarageName,
+    tableGarageFilter,
+    setTableGarageFilter
 }: ExpensesSectionProps) {
     // ── Modal state ──
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -51,9 +54,8 @@ export default function ExpensesSection({
 
     // ── Table state ──
     const [searchQuery, setSearchQuery] = useState('');
-    const [tableGarageFilter, setTableGarageFilter] = useState('all');
     const [currentPage, setCurrentPage] = useState(1);
-    const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'garage' | 'imputation' | 'amount'; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'amount'; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
     const ITEMS_PER_PAGE = 25;
 
     // ── Sync form garage when global filter changes ──
@@ -103,12 +105,6 @@ export default function ExpensesSection({
             if (sortConfig.key === 'date') {
                 valA = new Date(a.created_at).getTime();
                 valB = new Date(b.created_at).getTime();
-            } else if (sortConfig.key === 'garage') {
-                valA = getGarageName(a.garage_id, a.notes).toLowerCase();
-                valB = getGarageName(b.garage_id, b.notes).toLowerCase();
-            } else if (sortConfig.key === 'imputation') {
-                valA = (a.recipient_name || '').toLowerCase();
-                valB = (b.recipient_name || '').toLowerCase();
             } else if (sortConfig.key === 'amount') {
                 valA = a.amount;
                 valB = b.amount;
@@ -240,10 +236,26 @@ export default function ExpensesSection({
     // ─────────────────────────────────────────────────────────
 
     const handleSort = (key: typeof sortConfig.key) => {
-        setSortConfig(prev => ({
-            key,
-            direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
-        }));
+        setSortConfig(prev => {
+            if (key === 'date') {
+                return {
+                    key: 'date',
+                    direction: prev.key === 'date' && prev.direction === 'desc' ? 'asc' : 'desc',
+                };
+            }
+
+            if (key === 'amount') {
+                if (prev.key !== 'amount') {
+                    return { key: 'amount', direction: 'desc' };
+                }
+                if (prev.direction === 'desc') {
+                    return { key: 'amount', direction: 'asc' };
+                }
+                return { key: 'date', direction: 'desc' };
+            }
+
+            return prev;
+        });
     };
 
     const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
@@ -314,17 +326,11 @@ export default function ExpensesSection({
                                     >
                                         <div className="flex items-center gap-1">Fecha <SortIcon column="date" /></div>
                                     </th>
-                                    <th
-                                        className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
-                                        onClick={() => handleSort('garage')}
-                                    >
-                                        <div className="flex items-center gap-1">Garaje <SortIcon column="garage" /></div>
+                                    <th className="px-4 py-2 font-semibold">
+                                        <div className="flex items-center gap-1">Garaje</div>
                                     </th>
-                                    <th
-                                        className="px-4 py-2 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
-                                        onClick={() => handleSort('imputation')}
-                                    >
-                                        <div className="flex items-center gap-1">Imputación / Observaciones <SortIcon column="imputation" /></div>
+                                    <th className="px-4 py-2 font-semibold">
+                                        <div className="flex items-center gap-1">Imputación / Observaciones</div>
                                     </th>
                                     <th
                                         className="px-4 py-2 font-semibold text-right cursor-pointer hover:bg-slate-100 transition-colors"
